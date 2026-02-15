@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "dist-web",
+  "framework": "vite",
+  "functions": {
+    "api/stripe-webhook.ts": {
+      "maxDuration": 10
+    },
+    "api/ebay-auth.ts": {
+      "maxDuration": 10
+    }
+  }
+}

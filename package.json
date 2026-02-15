@@ -1,0 +1,39 @@
+{
+  "name": "fliptools",
+  "version": "0.1.0",
+  "description": "All-in-one e-commerce cross-listing and reselling toolkit",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:web": "tsc && vite build --mode web",
+    "preview": "vite preview",
+    "preview:web": "vite preview --outDir dist-web",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@stripe/stripe-js": "^2.4.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "lightweight-charts": "^4.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.0",
+    "react-router-dom": "^6.20.0",
+    "stripe": "^20.3.1",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-log": "^2.0.0",
+    "@tauri-apps/plugin-process": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "sharp": "^0.34.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
+  }
+}
