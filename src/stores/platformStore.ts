@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { PlatformId } from '../api/platforms';
 
 interface PlatformConnection {
@@ -21,27 +22,35 @@ interface PlatformState {
   getToken: (platform: PlatformId) => string | null;
 }
 
-export const usePlatformStore = create<PlatformState>()((set, get) => ({
-  connections: {},
-  syncStatus: {},
+export const usePlatformStore = create<PlatformState>()(
+  persist(
+    (set, get) => ({
+      connections: {},
+      syncStatus: {},
 
-  setConnection: (platform, connection) =>
-    set((s) => ({
-      connections: { ...s.connections, [platform]: connection },
-    })),
+      setConnection: (platform, connection) =>
+        set((s) => ({
+          connections: { ...s.connections, [platform]: connection },
+        })),
 
-  removeConnection: (platform) =>
-    set((s) => {
-      const connections = { ...s.connections };
-      delete connections[platform];
-      return { connections };
+      removeConnection: (platform) =>
+        set((s) => {
+          const connections = { ...s.connections };
+          delete connections[platform];
+          return { connections };
+        }),
+
+      setSyncStatus: (platform, status) =>
+        set((s) => ({
+          syncStatus: { ...s.syncStatus, [platform]: status },
+        })),
+
+      isConnected: (platform) => !!get().connections[platform],
+      getToken: (platform) => get().connections[platform]?.accessToken || null,
     }),
-
-  setSyncStatus: (platform, status) =>
-    set((s) => ({
-      syncStatus: { ...s.syncStatus, [platform]: status },
-    })),
-
-  isConnected: (platform) => !!get().connections[platform],
-  getToken: (platform) => get().connections[platform]?.accessToken || null,
-}));
+    {
+      name: 'fliptools-platforms',
+      partialize: (state) => ({ connections: state.connections }),
+    }
+  )
+);

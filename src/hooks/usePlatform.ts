@@ -8,7 +8,7 @@ export const usePlatform = (platformId: PlatformId) => {
 
   const connect = () => {
     const authUrl = adapter.getAuthUrl();
-    window.open(authUrl, '_blank', 'width=600,height=700');
+    window.location.href = authUrl;
   };
 
   const disconnect = () => {
