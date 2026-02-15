@@ -38,8 +38,12 @@ export default function EbayCallbackPage() {
           connectedAt: new Date().toISOString(),
         });
         setStatus('success');
-        // Redirect to settings after a short delay
-        setTimeout(() => navigate('/settings'), 2000);
+        // If opened as popup, close it; otherwise redirect
+        if (window.opener) {
+          setTimeout(() => window.close(), 1500);
+        } else {
+          setTimeout(() => navigate('/settings'), 2000);
+        }
       } catch (err) {
         setStatus('error');
         setErrorMsg((err as Error).message || 'Failed to connect eBay account');

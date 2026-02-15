@@ -8,7 +8,16 @@ export const usePlatform = (platformId: PlatformId) => {
 
   const connect = () => {
     const authUrl = adapter.getAuthUrl();
-    window.location.href = authUrl;
+    const popup = window.open(authUrl, 'ebay-auth', 'width=600,height=700');
+
+    // Listen for the popup to complete and close
+    const checkInterval = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkInterval);
+        // Re-read from localStorage since persist middleware saved there
+        window.location.reload();
+      }
+    }, 500);
   };
 
   const disconnect = () => {
