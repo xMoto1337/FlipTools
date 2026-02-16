@@ -1336,6 +1336,12 @@ a:hover {
   min-height: 300px;
 }
 
+/* Hide TradingView branding from lightweight-charts */
+.chart-container a[target="_blank"],
+.card a[target="_blank"] {
+  display: none !important;
+}
+
 /* ===== Loading ===== */
 .loading-spinner {
   display: flex;

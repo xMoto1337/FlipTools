@@ -16,7 +16,6 @@ export function RevenueChart({ sales, isLoading }: RevenueChartProps) {
     const container = chartContainerRef.current;
 
     const chart = createChart(container, {
-      watermark: { visible: false },
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#888888',
