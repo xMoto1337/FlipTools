@@ -37,7 +37,7 @@ export default function EbayCallbackPage() {
 
         if (!response.ok) {
           setStatus('error');
-          setErrorMsg(JSON.stringify(data, null, 2));
+          setErrorMsg(data.error || 'Failed to connect eBay account');
           return;
         }
 

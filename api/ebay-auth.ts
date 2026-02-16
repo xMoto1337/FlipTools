@@ -60,21 +60,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!response.ok) {
       console.error('eBay token exchange failed:', data);
-      console.error('Debug info:', {
-        sandbox: IS_SANDBOX,
-        apiUrl: EBAY_API_URL,
-        clientIdPrefix: clientId?.substring(0, 10) + '...',
-        secretPrefix: clientSecret?.substring(0, 10) + '...',
-        redirectUri,
-      });
       return res.status(response.status).json({
         error: data.error_description || data.error || 'Token exchange failed',
-        debug: {
-          sandbox: IS_SANDBOX,
-          apiUrl: EBAY_API_URL,
-          clientIdPrefix: clientId?.substring(0, 10) + '...',
-          redirectUri,
-        },
       });
     }
 
