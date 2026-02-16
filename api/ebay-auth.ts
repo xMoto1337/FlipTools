@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const IS_SANDBOX = process.env.VITE_EBAY_SANDBOX === 'true';
+const clientIdVal = process.env.VITE_EBAY_CLIENT_ID || '';
+const IS_SANDBOX = process.env.VITE_EBAY_SANDBOX === 'true' || clientIdVal.includes('SBX');
 const EBAY_API_URL = IS_SANDBOX
   ? 'https://api.sandbox.ebay.com'
   : 'https://api.ebay.com';
