@@ -5,7 +5,7 @@ import crypto from 'crypto';
 // Required by eBay for production API access compliance
 // See: https://developer.ebay.com/marketplace-account-deletion
 
-const VERIFICATION_TOKEN = process.env.EBAY_DELETION_VERIFICATION_TOKEN || 'fliptools_ebay_notify_2026_secure';
+const VERIFICATION_TOKEN = process.env.EBAY_DELETION_VERIFICATION_TOKEN || 'Ft8xK2mN9pQr4wLs7vBj1cYd3eHg5aZuTw';
 const ENDPOINT_URL = 'https://fliptools.net/api/ebay-deletion';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
