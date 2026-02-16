@@ -17,6 +17,7 @@ export const config = {
   ebay: {
     clientId: import.meta.env.VITE_EBAY_CLIENT_ID || '',
     redirectUri: import.meta.env.VITE_EBAY_REDIRECT_URI || '',
+    sandbox: import.meta.env.VITE_EBAY_SANDBOX === 'true',
   },
   googleVision: {
     apiKey: import.meta.env.VITE_GOOGLE_VISION_API_KEY || '',

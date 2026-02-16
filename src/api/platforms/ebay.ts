@@ -11,7 +11,8 @@ import type {
 } from './types';
 
 // Use sandbox URLs for development, switch to production for release
-const IS_SANDBOX = import.meta.env.DEV || import.meta.env.VITE_EBAY_SANDBOX === 'true';
+// Detect sandbox from config flag OR from client ID containing "SBX"
+const IS_SANDBOX = import.meta.env.DEV || config.ebay.sandbox || config.ebay.clientId.includes('SBX');
 const EBAY_AUTH_URL = IS_SANDBOX
   ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
   : 'https://auth.ebay.com/oauth2/authorize';
