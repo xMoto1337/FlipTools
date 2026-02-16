@@ -1,4 +1,5 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { usePlatformStore } from '../stores/platformStore';
 import { useResearchStore } from '../stores/researchStore';
@@ -22,6 +23,9 @@ export default function ResearchPage() {
   const { limit: searchLimit } = useFeatureGate('keyword-search');
   const { limit: historyLimit } = useFeatureGate('search-history');
 
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
+
   const {
     results,
     analysis,
@@ -40,17 +44,34 @@ export default function ResearchPage() {
     getSearchesRemaining,
   } = useResearchStore();
 
+  // Check if any platform is connected
+  const hasConnectedPlatform = getPlatformIds().some(
+    (id) => isConnected(id) && getToken(id)
+  );
+
   const handleKeywordSearch = async () => {
     if (!searchQuery.trim()) return;
+
+    setSearchError(null);
+
+    // Check if any platform is connected
+    if (!hasConnectedPlatform) {
+      setSearchError('Connect a platform (like eBay) in Settings to search sold items.');
+      return;
+    }
 
     // Check monthly limit for free users
     if (!isPaid && searchLimit) {
       const remaining = getSearchesRemaining(searchLimit);
-      if (remaining <= 0) return;
+      if (remaining <= 0) {
+        setSearchError('You\'ve reached your monthly search limit. Upgrade to Pro for unlimited searches.');
+        return;
+      }
     }
 
     setIsSearching(true);
     setResults([]);
+    setHasSearched(true);
 
     try {
       const allResults: typeof results = [];
@@ -85,6 +106,7 @@ export default function ResearchPage() {
       });
     } catch (err) {
       console.error('Search error:', err);
+      setSearchError('Search failed. Please try again.');
     } finally {
       setIsSearching(false);
     }
@@ -115,12 +137,24 @@ export default function ResearchPage() {
     const file = acceptedFiles[0];
     if (!file) return;
 
+    setSearchError(null);
+
+    // Check if any platform is connected
+    const connected = getPlatformIds().some(
+      (id) => isConnected(id) && getToken(id)
+    );
+    if (!connected) {
+      setSearchError('Connect a platform (like eBay) in Settings to use image search.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => setImagePreview(reader.result as string);
     reader.readAsDataURL(file);
 
     setIsSearching(true);
     setResults([]);
+    setHasSearched(true);
 
     try {
       const allResults: typeof results = [];
@@ -154,6 +188,7 @@ export default function ResearchPage() {
       });
     } catch (err) {
       console.error('Image search error:', err);
+      setSearchError('Image search failed. Please try again.');
     } finally {
       setIsSearching(false);
     }
@@ -242,6 +277,31 @@ export default function ResearchPage() {
         </div>
       )}
 
+      {/* Connection / Error Banner */}
+      {searchError && (
+        <div className="card" style={{ marginBottom: 24, padding: '14px 20px', border: '1px solid var(--neon-red)', background: 'rgba(255, 0, 60, 0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--neon-red)" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span style={{ color: 'var(--text-primary)', fontSize: 13 }}>{searchError}</span>
+          </div>
+        </div>
+      )}
+
+      {!hasConnectedPlatform && !searchError && (
+        <div className="card" style={{ marginBottom: 24, padding: '14px 20px', border: '1px solid var(--neon-cyan)', background: 'rgba(0, 255, 255, 0.03)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+              Connect a platform in <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Settings</Link> to start searching sold items.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Market Analysis */}
       {analysis && !isSearching && (
         <div style={{ marginBottom: 24 }}>
@@ -298,6 +358,14 @@ export default function ResearchPage() {
             ))}
           </div>
         </>
+      ) : hasSearched && !searchError ? (
+        <div className="card" style={{ marginBottom: 24, padding: '32px 20px', textAlign: 'center' }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" style={{ marginBottom: 12 }}>
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 4 }}>No results found for "{searchQuery}"</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>Try a different search term or check your spelling</p>
+        </div>
       ) : null}
 
       {/* Saved Searches (Pro only) */}
