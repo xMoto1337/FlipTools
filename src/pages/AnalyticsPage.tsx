@@ -4,6 +4,7 @@ import { useAnalyticsStore } from '../stores/analyticsStore';
 import { analyticsApi } from '../api/analytics';
 import { useSubscription, useFeatureGate } from '../hooks/useSubscription';
 import { PaywallGate } from '../components/Subscription/PaywallGate';
+import { RevenueChart } from '../components/Analytics/RevenueChart';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 const dateRanges = [
@@ -98,20 +99,12 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Sales Chart placeholder */}
+      {/* Sales Chart */}
       <div className="chart-container" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <div className="card-title">Revenue Over Time</div>
         </div>
-        <div style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-          {isLoading ? (
-            <div className="spinner" />
-          ) : sales.length > 0 ? (
-            <p>Chart visualization will render here with lightweight-charts</p>
-          ) : (
-            <p>No sales data for this period</p>
-          )}
-        </div>
+        <RevenueChart sales={sales} isLoading={isLoading} />
       </div>
 
       {/* Export - Pro only */}

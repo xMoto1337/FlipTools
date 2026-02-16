@@ -236,9 +236,36 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async searchSold(query: string, token: string): Promise<SoldItem[]> {
+    // Try Marketplace Insights API for actual sold/completed items
+    const insightsParams = new URLSearchParams({
+      q: query,
+      filter: 'buyingOptions:{FIXED_PRICE|AUCTION},priceCurrency:USD',
+      sort: 'newlyListed',
+      limit: '50',
+    });
+
+    const insightsResponse = await fetch(
+      `${EBAY_API_URL}/buy/marketplace_insights/v1_beta/item_sales/search?${insightsParams}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+
+    if (insightsResponse.ok) {
+      const data = await insightsResponse.json();
+      return (data.itemSales || []).map((item: Record<string, unknown>) => ({
+        title: item.title as string,
+        price: Number(((item.lastSoldPrice || item.price) as Record<string, unknown>)?.value || 0),
+        soldDate: (item.lastSoldDate as string) || '',
+        condition: (item.condition as string) || '',
+        imageUrl: ((item.thumbnailImages as Record<string, string>[]) || [])[0]?.imageUrl || ((item.image as Record<string, string>)?.imageUrl) || '',
+        url: item.itemWebUrl as string || '',
+        platform: 'ebay',
+      }));
+    }
+
+    // Fallback to Browse API if Marketplace Insights is unavailable
     const params = new URLSearchParams({
       q: query,
-      filter: 'buyingOptions:{FIXED_PRICE|AUCTION},conditions:{NEW|USED}',
+      filter: 'buyingOptions:{FIXED_PRICE|AUCTION}',
       sort: 'newlyListed',
       limit: '50',
     });
