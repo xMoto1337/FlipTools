@@ -28,17 +28,29 @@ export default function EbayCallbackPage() {
 
     (async () => {
       try {
-        const tokens = await ebayAdapter.handleCallback(code);
+        const response = await fetch('/api/ebay-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, grant_type: 'authorization_code' }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setStatus('error');
+          setErrorMsg(JSON.stringify(data, null, 2));
+          return;
+        }
+
         setConnection('ebay', {
           platform: 'ebay',
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          tokenExpiresAt: tokens.expiresAt,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          tokenExpiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
           platformUsername: 'eBay Account',
           connectedAt: new Date().toISOString(),
         });
         setStatus('success');
-        // If opened as popup, close it; otherwise redirect
         if (window.opener) {
           setTimeout(() => window.close(), 1500);
         } else {
