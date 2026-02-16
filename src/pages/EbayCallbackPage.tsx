@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ebayAdapter } from '../api/platforms/ebay';
 import { usePlatformStore } from '../stores/platformStore';
 
 export default function EbayCallbackPage() {
