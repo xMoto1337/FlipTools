@@ -27,6 +27,7 @@ export function PriceTrendChart({ results, analysis, isLoading }: PriceTrendChar
     const container = chartContainerRef.current;
 
     const chart = createChart(container, {
+      watermark: { visible: false },
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#888888',
