@@ -19,11 +19,21 @@ export const useFeatureGate = (feature: string): { allowed: boolean; limit?: num
   const freeLimits: Record<string, number> = {
     'cross-list': 10,
     'image-search': 5,
+    'keyword-search': 10,
+    'search-history': 5,
     'analytics-days': 30,
     'platform-connections': 1,
   };
 
-  const premiumOnly = ['bulk-actions', 'export-csv', 'advanced-analytics'];
+  const premiumOnly = [
+    'bulk-actions',
+    'export-csv',
+    'advanced-analytics',
+    'market-analysis',
+    'saved-searches',
+    'profit-calculator-multi',
+    'price-trend-chart',
+  ];
 
   if (isPaid) return { allowed: true };
 

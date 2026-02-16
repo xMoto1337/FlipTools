@@ -1,41 +1,114 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { usePlatformStore } from '../stores/platformStore';
+import { useResearchStore } from '../stores/researchStore';
 import { useRequireAuth } from '../hooks/useRequireAuth';
-import { getPlatform } from '../api/platforms';
-import { useFeatureGate } from '../hooks/useSubscription';
+import { getPlatform, getPlatformIds } from '../api/platforms';
+import { useSubscription, useFeatureGate } from '../hooks/useSubscription';
 import { PaywallGate } from '../components/Subscription/PaywallGate';
-import { formatCurrency, formatDate } from '../utils/formatters';
-import type { SoldItem } from '../api/platforms';
+import { MarketAnalysis } from '../components/Research/MarketAnalysis';
+import { PriceTrendChart } from '../components/Research/PriceTrendChart';
+import { ProfitCalculator } from '../components/Research/ProfitCalculator';
+import { SearchHistory } from '../components/Research/SearchHistory';
+import { SavedSearches } from '../components/Research/SavedSearches';
 
 export default function ResearchPage() {
   const { requireAuth } = useRequireAuth();
-  const [tab, setTab] = useState<'keyword' | 'image'>('keyword');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [results, setResults] = useState<SoldItem[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const { getToken } = usePlatformStore();
-
+  const { isConnected, getToken } = usePlatformStore();
+  const { isPaid } = useSubscription();
   const { allowed: imageSearchAllowed } = useFeatureGate('image-search');
+  const { allowed: trendAllowed } = useFeatureGate('price-trend-chart');
+  const { allowed: savedAllowed } = useFeatureGate('saved-searches');
+  const { limit: searchLimit } = useFeatureGate('keyword-search');
+  const { limit: historyLimit } = useFeatureGate('search-history');
+
+  const {
+    results,
+    analysis,
+    isSearching,
+    searchQuery,
+    searchType,
+    imagePreview,
+    setResults,
+    setIsSearching,
+    setSearchQuery,
+    setSearchType,
+    setImagePreview,
+    addToHistory,
+    computeAnalysis,
+    incrementSearchCount,
+    getSearchesRemaining,
+  } = useResearchStore();
 
   const handleKeywordSearch = async () => {
     if (!searchQuery.trim()) return;
+
+    // Check monthly limit for free users
+    if (!isPaid && searchLimit) {
+      const remaining = getSearchesRemaining(searchLimit);
+      if (remaining <= 0) return;
+    }
+
     setIsSearching(true);
     setResults([]);
 
     try {
-      const ebayToken = getToken('ebay');
-      if (ebayToken) {
-        const adapter = getPlatform('ebay');
-        const items = await adapter.searchSold(searchQuery, ebayToken);
-        setResults(items);
+      const allResults: typeof results = [];
+
+      // Search across all connected platforms
+      const searchPromises = getPlatformIds().map(async (platformId) => {
+        const token = getToken(platformId);
+        if (!token || !isConnected(platformId)) return [];
+        const adapter = getPlatform(platformId);
+        return adapter.searchSold(searchQuery, token);
+      });
+
+      const settled = await Promise.allSettled(searchPromises);
+      for (const result of settled) {
+        if (result.status === 'fulfilled') {
+          allResults.push(...result.value);
+        }
       }
+
+      setResults(allResults);
+      incrementSearchCount();
+
+      // Add to history
+      const avgPrice = allResults.length > 0
+        ? allResults.reduce((s, r) => s + r.price, 0) / allResults.length
+        : 0;
+      addToHistory({
+        query: searchQuery,
+        searchType: 'keyword',
+        resultCount: allResults.length,
+        avgPrice: Math.round(avgPrice * 100) / 100,
+      });
     } catch (err) {
       console.error('Search error:', err);
     } finally {
       setIsSearching(false);
     }
+  };
+
+  // Compute analysis whenever results change
+  const prevResultsRef = useResearchStore.getState().results;
+  if (results !== prevResultsRef && results.length > 0 && !analysis) {
+    computeAnalysis();
+  }
+
+  // Run analysis after search
+  const runSearchAndAnalyze = async () => {
+    await handleKeywordSearch();
+    computeAnalysis();
+  };
+
+  const handleReSearch = (query: string) => {
+    setSearchQuery(query);
+    setSearchType('keyword');
+    setTimeout(() => {
+      useResearchStore.getState().setSearchQuery(query);
+      runSearchAndAnalyze();
+    }, 0);
   };
 
   const onDropInner = useCallback(async (acceptedFiles: File[]) => {
@@ -50,20 +123,41 @@ export default function ResearchPage() {
     setResults([]);
 
     try {
-      const ebayToken = getToken('ebay');
-      if (ebayToken) {
-        const adapter = getPlatform('ebay');
+      const allResults: typeof results = [];
+
+      for (const platformId of getPlatformIds()) {
+        const token = getToken(platformId);
+        if (!token || !isConnected(platformId)) continue;
+        const adapter = getPlatform(platformId);
         if (adapter.searchByImage) {
-          const items = await adapter.searchByImage(URL.createObjectURL(file), ebayToken);
-          setResults(items);
+          try {
+            const items = await adapter.searchByImage(URL.createObjectURL(file), token);
+            allResults.push(...items);
+          } catch {
+            // Platform doesn't support image search
+          }
         }
       }
+
+      setResults(allResults);
+      incrementSearchCount();
+      computeAnalysis();
+
+      const avgPrice = allResults.length > 0
+        ? allResults.reduce((s, r) => s + r.price, 0) / allResults.length
+        : 0;
+      addToHistory({
+        query: file.name,
+        searchType: 'image',
+        resultCount: allResults.length,
+        avgPrice: Math.round(avgPrice * 100) / 100,
+      });
     } catch (err) {
       console.error('Image search error:', err);
     } finally {
       setIsSearching(false);
     }
-  }, [getToken]);
+  }, [getToken, isConnected]);
 
   const onDrop = requireAuth(onDropInner, 'Sign in to use image search');
 
@@ -73,27 +167,29 @@ export default function ResearchPage() {
     maxFiles: 1,
   });
 
-  // Stats from results
-  const avgPrice = results.length > 0 ? results.reduce((s, r) => s + r.price, 0) / results.length : 0;
-  const minPrice = results.length > 0 ? Math.min(...results.map((r) => r.price)) : 0;
-  const maxPrice = results.length > 0 ? Math.max(...results.map((r) => r.price)) : 0;
+  const searchesRemaining = searchLimit ? getSearchesRemaining(searchLimit) : null;
 
   return (
     <div>
       <div className="page-header">
-        <h1>Price Research</h1>
+        <h1>Product Research</h1>
+        {!isPaid && searchesRemaining !== null && (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {searchesRemaining} searches left this month
+          </span>
+        )}
       </div>
 
       <div className="tabs">
-        <button className={`tab ${tab === 'keyword' ? 'active' : ''}`} onClick={() => setTab('keyword')}>
+        <button className={`tab ${searchType === 'keyword' ? 'active' : ''}`} onClick={() => setSearchType('keyword')}>
           Keyword Search
         </button>
-        <button className={`tab ${tab === 'image' ? 'active' : ''}`} onClick={() => setTab('image')}>
+        <button className={`tab ${searchType === 'image' ? 'active' : ''}`} onClick={() => setSearchType('image')}>
           Image Search
         </button>
       </div>
 
-      {tab === 'keyword' ? (
+      {searchType === 'keyword' ? (
         <div className="card" style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', gap: 12 }}>
             <div className="search-input-wrapper" style={{ flex: 1, maxWidth: 'none' }}>
@@ -103,10 +199,18 @@ export default function ResearchPage() {
                 placeholder="Search sold items (e.g. 'Nike Air Max 90 size 10')"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && requireAuth(handleKeywordSearch, 'Sign in to search sold items')()}
+                onKeyDown={(e) => e.key === 'Enter' && requireAuth(runSearchAndAnalyze, 'Sign in to search sold items')()}
               />
             </div>
-            <button className="btn btn-primary" onClick={requireAuth(handleKeywordSearch, 'Sign in to search sold items')} disabled={isSearching}>
+            <SearchHistory
+              onReSearch={handleReSearch}
+              maxEntries={isPaid ? 50 : (historyLimit || 5)}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={requireAuth(runSearchAndAnalyze, 'Sign in to search sold items')}
+              disabled={isSearching || (!isPaid && searchesRemaining !== null && searchesRemaining <= 0)}
+            >
               {isSearching ? 'Searching...' : 'Search'}
             </button>
           </div>
@@ -122,62 +226,97 @@ export default function ResearchPage() {
               </div>
             </PaywallGate>
           ) : (
-            <>
-              <div {...getRootProps()} className={`image-uploader ${isDragActive ? 'drag-active' : ''}`}>
-                <input {...getInputProps()} />
-                {imagePreview ? (
-                  <img src={imagePreview} alt="Preview" style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8 }} />
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                    <p>Drag & drop an image or <span className="highlight">click to browse</span></p>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Supports PNG, JPG, WEBP</p>
-                  </>
-                )}
-              </div>
-            </>
+            <div {...getRootProps()} className={`image-uploader ${isDragActive ? 'drag-active' : ''}`}>
+              <input {...getInputProps()} />
+              {imagePreview ? (
+                <img src={imagePreview} alt="Preview" style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8 }} />
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  <p>Drag & drop an image or <span className="highlight">click to browse</span></p>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Supports PNG, JPG, WEBP</p>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {/* Stats */}
-      {results.length > 0 && (
-        <div className="stats-grid" style={{ marginBottom: 24 }}>
-          <div className="stat-card">
-            <div className="stat-label">Avg Sold Price</div>
-            <div className="stat-value">{formatCurrency(avgPrice)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Price Range</div>
-            <div className="stat-value" style={{ fontSize: 20 }}>
-              {formatCurrency(minPrice)} - {formatCurrency(maxPrice)}
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Results Found</div>
-            <div className="stat-value">{results.length}</div>
-          </div>
+      {/* Market Analysis */}
+      {analysis && !isSearching && (
+        <div style={{ marginBottom: 24 }}>
+          <MarketAnalysis analysis={analysis} />
         </div>
       )}
 
-      {/* Results */}
+      {/* Price Trend Chart + Profit Calculator (2-column) */}
+      {results.length > 0 && !isSearching && (
+        <div className="research-analysis-grid">
+          <div className="chart-container">
+            <div className="card-header">
+              <div className="card-title">Price Trends</div>
+            </div>
+            {!trendAllowed ? (
+              <PaywallGate feature="Price Trend Charts">
+                <div style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                  <p>Upgrade to see price trends over time</p>
+                </div>
+              </PaywallGate>
+            ) : (
+              <PriceTrendChart results={results} analysis={analysis} isLoading={isSearching} />
+            )}
+          </div>
+          <ProfitCalculator avgPrice={analysis?.avgPrice || 0} />
+        </div>
+      )}
+
+      {/* Results Grid */}
       {isSearching ? (
         <div className="loading-spinner"><div className="spinner" /></div>
       ) : results.length > 0 ? (
-        <div className="comp-grid">
-          {results.map((item, i) => (
-            <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" className="comp-card" style={{ textDecoration: 'none', color: 'inherit' }}>
-              {item.imageUrl && <img src={item.imageUrl} alt={item.title} />}
-              <div className="comp-card-body">
-                <div className="comp-card-title">{item.title}</div>
-                <div className="comp-card-price">{formatCurrency(item.price)}</div>
-                {item.soldDate && <div className="comp-card-date">{formatDate(item.soldDate)}</div>}
-                <span className={`platform-badge ${item.platform}`} style={{ marginTop: 4 }}>{item.platform}</span>
-              </div>
-            </a>
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600 }}>
+              {results.length} Comparable{results.length !== 1 ? 's' : ''} Found
+            </h3>
+          </div>
+          <div className="comp-grid" style={{ marginBottom: 24 }}>
+            {results.map((item, i) => (
+              <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" className="comp-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                {item.imageUrl && <img src={item.imageUrl} alt={item.title} />}
+                <div className="comp-card-body">
+                  <div className="comp-card-title">{item.title}</div>
+                  <div className="comp-card-price">${item.price.toFixed(2)}</div>
+                  {item.soldDate && (
+                    <div className="comp-card-date">
+                      {new Date(item.soldDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </div>
+                  )}
+                  <span className={`platform-badge ${item.platform}`} style={{ marginTop: 4 }}>{item.platform}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        </>
       ) : null}
+
+      {/* Saved Searches (Pro only) */}
+      {!savedAllowed ? (
+        <PaywallGate feature="Saved Searches & Watchlist">
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-title">Saved Searches</div>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Save and track your product research over time</p>
+          </div>
+        </PaywallGate>
+      ) : (
+        <SavedSearches
+          onReSearch={handleReSearch}
+          currentQuery={searchQuery}
+          currentAvgPrice={analysis?.avgPrice || 0}
+          currentResultCount={results.length}
+          currentResults={results}
+        />
+      )}
     </div>
   );
 }

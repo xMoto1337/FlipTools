@@ -1495,6 +1495,337 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ===== Research Enhanced ===== */
+
+/* Stat sub-text */
+.stat-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Demand Meter */
+.demand-meter {
+  margin-top: 8px;
+}
+
+.demand-meter-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, var(--neon-red), var(--neon-yellow), var(--neon-green));
+  margin-bottom: 8px;
+}
+
+.demand-meter-marker {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 14px;
+  background: #fff;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+}
+
+.demand-meter-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.demand-meter-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.demand-meter-score {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--neon-cyan);
+}
+
+/* Day of week distribution */
+.day-distribution {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 40px;
+  margin-top: 8px;
+}
+
+.day-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.day-bar {
+  width: 100%;
+  min-height: 2px;
+  background: var(--neon-cyan);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.7;
+  margin-top: auto;
+}
+
+.day-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Profit Calculator */
+.profit-calc .card-header {
+  margin-bottom: 16px;
+}
+
+.profit-calc-input-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.profit-calc-platform-row {
+  padding: 12px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.profit-calc-platform-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.profit-calc-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profit-calc-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.profit-calc-total {
+  padding-top: 6px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border-color);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.profit-calc-verdict {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profit-calc-verdict.worth-it {
+  color: var(--neon-green);
+}
+
+.profit-calc-verdict.marginal {
+  color: var(--neon-yellow);
+}
+
+.profit-calc-verdict.not-worth {
+  color: var(--neon-red);
+}
+
+/* Price Distribution Histogram */
+.price-histogram {
+  padding: 12px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-md);
+}
+
+.price-histogram-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.price-histogram-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.price-histogram-bar-track {
+  flex: 1;
+  height: 12px;
+  background: var(--bg-dark);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.price-histogram-bar {
+  height: 100%;
+  background: var(--neon-cyan);
+  border-radius: 3px;
+  opacity: 0.6;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.price-histogram-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 20px;
+  flex-shrink: 0;
+}
+
+/* Search History */
+.search-history-wrapper {
+  position: relative;
+}
+
+.search-history-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  margin-top: 4px;
+}
+
+.search-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.search-history-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+  transition: background var(--transition-fast);
+  color: var(--text-primary);
+}
+
+.search-history-item:hover {
+  background: var(--bg-hover);
+}
+
+.search-history-query {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.search-history-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Saved Searches */
+.saved-searches-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.saved-search-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.saved-search-item:hover {
+  background: var(--bg-hover);
+}
+
+.saved-search-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.saved-search-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-search-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.saved-search-price-change.up {
+  color: var(--neon-green);
+}
+
+.saved-search-price-change.down {
+  color: var(--neon-red);
+}
+
+.saved-search-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Research Analysis Grid (2-column) */
+.research-analysis-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 768px) {
+  .research-analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profit-calc-input-row {
+    flex-direction: column;
+  }
+
+  .search-history-dropdown {
+    width: 280px;
+  }
+}
+
 /* ===== Settings ===== */
 .settings-section {
   margin-bottom: 32px;
