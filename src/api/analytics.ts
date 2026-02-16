@@ -186,37 +186,55 @@ export const analyticsApi = {
 
         if (platformSales.length === 0) continue;
 
-        // Upsert each sale — use external_id for dedup
-        for (const item of platformSales) {
-          if (!item.orderId) continue;
+        // Get existing external_ids to avoid duplicates
+        // (PostgREST can't use partial unique indexes for onConflict)
+        const orderIds = platformSales
+          .map((s) => s.orderId)
+          .filter((id): id is string => !!id);
 
-          const { error } = await supabase
-            .from('sales')
-            .upsert(
-              {
-                user_id: user.id,
-                platform: item.platform,
-                sale_price: item.price,
-                shipping_cost: item.shippingCost || 0,
-                platform_fees: item.platformFees || 0,
-                cost: 0,
-                buyer_username: item.buyerUsername || null,
-                sold_at: item.soldDate || new Date().toISOString(),
-                external_id: item.orderId,
-                item_title: item.title,
-                item_image_url: item.imageUrl || null,
-              },
-              {
-                onConflict: 'user_id,platform,external_id',
-                ignoreDuplicates: true,
-              }
-            );
+        const { data: existing } = await supabase
+          .from('sales')
+          .select('external_id')
+          .eq('user_id', user.id)
+          .eq('platform', platformId)
+          .in('external_id', orderIds);
 
-          if (error) {
-            console.error(`[sync] Failed to upsert sale ${item.orderId}:`, error);
-          } else {
-            totalSynced++;
-          }
+        const existingIds = new Set((existing || []).map((r) => r.external_id));
+
+        // Insert only new sales
+        const newSales = platformSales.filter(
+          (item) => item.orderId && !existingIds.has(item.orderId)
+        );
+
+        if (newSales.length === 0) {
+          console.log(`[sync] ${platformId}: all ${platformSales.length} sales already synced`);
+          totalSynced += platformSales.length;
+          continue;
+        }
+
+        console.log(`[sync] ${platformId}: inserting ${newSales.length} new sales`);
+
+        const rows = newSales.map((item) => ({
+          user_id: user.id,
+          platform: item.platform,
+          sale_price: item.price,
+          shipping_cost: item.shippingCost || 0,
+          platform_fees: item.platformFees || 0,
+          cost: 0,
+          buyer_username: item.buyerUsername || null,
+          sold_at: item.soldDate || new Date().toISOString(),
+          external_id: item.orderId,
+          item_title: item.title,
+          item_image_url: item.imageUrl || null,
+        }));
+
+        const { error } = await supabase.from('sales').insert(rows);
+
+        if (error) {
+          console.error(`[sync] Batch insert failed for ${platformId}:`, error);
+          errors.push(`${platformId}: ${error.message}`);
+        } else {
+          totalSynced += newSales.length;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
