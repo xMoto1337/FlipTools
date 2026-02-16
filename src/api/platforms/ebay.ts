@@ -198,26 +198,84 @@ export const ebayAdapter: PlatformAdapter = {
     }));
   },
 
-  async getSales(_params: SalesQuery, token: string): Promise<SoldItem[]> {
-    const response = await ebayGet(
-      '/sell/fulfillment/v1/order?limit=50&orderBy=creationdate',
-      token
-    );
-    const data = await response.json();
-    if (!response.ok) return [];
-
-    return (data.orders || []).map((order: Record<string, unknown>) => {
-      const lineItem = (order.lineItems as Record<string, unknown>[])?.[0] || {};
-      return {
-        title: (lineItem.title as string) || 'Unknown',
-        price: Number((order.pricingSummary as Record<string, unknown>)?.total || 0),
-        soldDate: order.creationDate as string,
-        condition: '',
-        imageUrl: '',
-        url: '',
-        platform: 'ebay',
-      };
+  async getSales(params: SalesQuery, token: string): Promise<SoldItem[]> {
+    // Build query with date filters and pagination
+    const queryParams = new URLSearchParams({
+      limit: String(params.limit || 200),
+      orderBy: 'creationdate',
     });
+
+    // eBay Fulfillment API uses filter for date ranges
+    const filters: string[] = [];
+    if (params.startDate) {
+      filters.push(`creationdate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`);
+    }
+    if (filters.length > 0) {
+      queryParams.set('filter', filters.join(','));
+    }
+
+    const allOrders: SoldItem[] = [];
+    let offset = 0;
+    const limit = params.limit || 200;
+
+    // Paginate through orders
+    while (true) {
+      queryParams.set('offset', String(offset));
+      const response = await ebayGet(
+        `/sell/fulfillment/v1/order?${queryParams}`,
+        token
+      );
+      const data = await response.json();
+      if (!response.ok) break;
+
+      const orders = data.orders || [];
+      if (orders.length === 0) break;
+
+      for (const order of orders) {
+        const lineItems = (order.lineItems as Record<string, unknown>[]) || [];
+        const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
+        const buyer = (order.buyer as Record<string, string>) || {};
+
+        // Get the total sale price
+        const salePrice = Number(pricing.total?.value || 0);
+        const shippingCost = Number(pricing.deliveryCost?.value || 0);
+
+        // Estimate fees from sale price
+        const fees = ebayAdapter.calculateFees(salePrice);
+
+        // Get the first line item for title/image
+        const firstItem = lineItems[0] || {};
+        const title = (firstItem.title as string) || 'Unknown Item';
+        const legacyItemId = firstItem.legacyItemId as string;
+        const itemUrl = legacyItemId ? `https://www.ebay.com/itm/${legacyItemId}` : '';
+        const itemImage = ((firstItem.image as Record<string, string>)?.imageUrl) || '';
+
+        // Multi-item orders: combine titles
+        const fullTitle = lineItems.length > 1
+          ? `${title} (+${lineItems.length - 1} more)`
+          : title;
+
+        allOrders.push({
+          title: fullTitle,
+          price: salePrice,
+          soldDate: (order.creationDate as string) || '',
+          condition: '',
+          imageUrl: itemImage,
+          url: itemUrl,
+          platform: 'ebay',
+          shippingCost,
+          platformFees: fees.totalFees,
+          buyerUsername: buyer.username || undefined,
+          orderId: order.orderId as string,
+        });
+      }
+
+      // Check if there are more pages
+      if (orders.length < limit) break;
+      offset += orders.length;
+    }
+
+    return allOrders;
   },
 
   async searchSold(query: string, token: string): Promise<SoldItem[]> {

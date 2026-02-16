@@ -29,6 +29,11 @@ export interface SoldItem {
   imageUrl: string;
   url: string;
   platform: string;
+  // Extended fields for sales sync
+  shippingCost?: number;
+  platformFees?: number;
+  buyerUsername?: string;
+  orderId?: string;
 }
 
 export interface FeeBreakdown {

@@ -7,26 +7,51 @@ import { useInventoryStore } from '../stores/inventoryStore';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { analyticsApi } from '../api/analytics';
 import { listingsApi } from '../api/listings';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
 
 export default function DashboardPage() {
   const { subscription, isAuthenticated } = useAuthStore();
   const { requireAuth } = useRequireAuth();
   const { listings, setListings } = useListingStore();
-  const { stats, setStats, setLoading: setAnalyticsLoading } = useAnalyticsStore();
+  const {
+    sales,
+    stats,
+    isSyncing,
+    isLoading,
+    setSales,
+    setStats,
+    setLoading: setAnalyticsLoading,
+    setSyncing,
+    setLastSyncedAt,
+  } = useAnalyticsStore();
   const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    const loadData = async () => {
+
+    const syncAndLoad = async () => {
+      // Sync platform sales first
+      setSyncing(true);
+      try {
+        await analyticsApi.syncPlatformSales();
+        setLastSyncedAt(new Date().toISOString());
+      } catch (err) {
+        console.error('Dashboard sync error:', err);
+      } finally {
+        setSyncing(false);
+      }
+
+      // Then load everything from Supabase
       setAnalyticsLoading(true);
       try {
-        const [salesStats, allListings] = await Promise.all([
+        const [salesStats, salesData, allListings] = await Promise.all([
           analyticsApi.getStats(),
+          analyticsApi.getSales({ limit: 10 }),
           listingsApi.getAll({ limit: 50 }),
         ]);
         setStats(salesStats);
+        setSales(salesData);
         setListings(allListings);
       } catch (err) {
         console.error('Dashboard load error:', err);
@@ -34,11 +59,13 @@ export default function DashboardPage() {
         setAnalyticsLoading(false);
       }
     };
-    loadData();
+
+    syncAndLoad();
   }, [isAuthenticated]);
 
   const activeListings = listings.filter((l) => l.status === 'active').length;
   const draftListings = listings.filter((l) => l.status === 'draft').length;
+  const recentSales = sales.slice(0, 5);
 
   return (
     <div>
@@ -103,6 +130,73 @@ export default function DashboardPage() {
           <div className="stat-label">Inventory Items</div>
           <div className="stat-value">{totalItems()}</div>
         </div>
+      </div>
+
+      {/* Recent Sales */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-header">
+          <div className="card-title">Recent Sales</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {isSyncing && (
+              <span style={{ fontSize: 12, color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="spinner" style={{ width: 14, height: 14 }} />
+                Syncing...
+              </span>
+            )}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate('/analytics')}
+              style={{ fontSize: 12 }}
+            >
+              View All
+            </button>
+          </div>
+        </div>
+        {isLoading || isSyncing ? (
+          <div className="loading-spinner" style={{ padding: 32 }}><div className="spinner" /></div>
+        ) : recentSales.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+            {isAuthenticated ? 'No sales yet. Connect eBay in Settings to sync your sales.' : 'Sign in to view your sales.'}
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Platform</th>
+                <th>Sale Price</th>
+                <th>Profit</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentSales.map((sale) => (
+                <tr key={sale.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {sale.item_image_url && (
+                        <img
+                          src={sale.item_image_url}
+                          alt=""
+                          style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover' }}
+                        />
+                      )}
+                      <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {sale.item_title || sale.listing?.title || 'Unknown item'}
+                      </span>
+                    </div>
+                  </td>
+                  <td><span className={`platform-badge ${sale.platform}`}>{sale.platform}</span></td>
+                  <td>{formatCurrency(sale.sale_price)}</td>
+                  <td style={{ color: sale.profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)' }}>
+                    {formatCurrency(sale.profit)}
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{formatDate(sale.sold_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="dashboard-grid">

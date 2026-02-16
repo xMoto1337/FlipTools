@@ -9,12 +9,16 @@ interface AnalyticsState {
   dateRange: DateRange;
   platformFilter: string;
   isLoading: boolean;
+  isSyncing: boolean;
+  lastSyncedAt: string | null;
 
   setSales: (sales: Sale[]) => void;
   setStats: (stats: SalesStats) => void;
   setDateRange: (range: DateRange) => void;
   setPlatformFilter: (platform: string) => void;
   setLoading: (loading: boolean) => void;
+  setSyncing: (syncing: boolean) => void;
+  setLastSyncedAt: (date: string) => void;
 
   getDateRangeStart: () => string;
 }
@@ -25,12 +29,16 @@ export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
   dateRange: '30d',
   platformFilter: '',
   isLoading: false,
+  isSyncing: false,
+  lastSyncedAt: null,
 
   setSales: (sales) => set({ sales }),
   setStats: (stats) => set({ stats }),
   setDateRange: (dateRange) => set({ dateRange }),
   setPlatformFilter: (platformFilter) => set({ platformFilter }),
   setLoading: (isLoading) => set({ isLoading }),
+  setSyncing: (isSyncing) => set({ isSyncing }),
+  setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt }),
 
   getDateRangeStart: () => {
     const { dateRange } = get();
