@@ -12,13 +12,10 @@ import type {
 
 // Use sandbox URLs for development, switch to production for release
 // Detect sandbox from config flag OR from client ID containing "SBX"
-const IS_SANDBOX = import.meta.env.DEV || config.ebay.sandbox || config.ebay.clientId.includes('SBX');
+const IS_SANDBOX = config.ebay.sandbox || config.ebay.clientId.includes('SBX');
 const EBAY_AUTH_URL = IS_SANDBOX
   ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
   : 'https://auth.ebay.com/oauth2/authorize';
-const EBAY_API_URL = IS_SANDBOX
-  ? 'https://api.sandbox.ebay.com'
-  : 'https://api.ebay.com';
 
 const CONDITION_MAP: Record<string, string> = {
   'new': 'NEW',
@@ -28,6 +25,25 @@ const CONDITION_MAP: Record<string, string> = {
   'acceptable': 'ACCEPTABLE',
   'for parts': 'FOR_PARTS_OR_NOT_WORKING',
 };
+
+// All eBay API calls must go through our proxy to avoid CORS issues
+async function ebayGet(endpoint: string, token: string): Promise<Response> {
+  const resp = await fetch('/api/ebay-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint, token, method: 'GET' }),
+  });
+  return resp;
+}
+
+async function ebayPost(endpoint: string, token: string, payload: unknown): Promise<Response> {
+  const resp = await fetch('/api/ebay-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint, token, method: 'POST', payload }),
+  });
+  return resp;
+}
 
 export const ebayAdapter: PlatformAdapter = {
   name: 'eBay',
@@ -52,7 +68,6 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async handleCallback(code: string): Promise<TokenPair> {
-    // Token exchange must go through our backend (CORS blocks direct eBay calls)
     const response = await fetch('/api/ebay-auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -87,63 +102,42 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async createListing(listing: ListingData, token: string): Promise<PlatformListing> {
-    // Using eBay Inventory API
     const sku = `FT-${Date.now()}`;
 
     // Create inventory item
-    await fetch(`${EBAY_API_URL}/sell/inventory/v1/inventory_item/${sku}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Content-Language': 'en-US',
+    await ebayPost(`/sell/inventory/v1/inventory_item/${sku}`, token, {
+      product: {
+        title: listing.title,
+        description: listing.description,
+        imageUrls: listing.images,
       },
-      body: JSON.stringify({
-        product: {
-          title: listing.title,
-          description: listing.description,
-          imageUrls: listing.images,
-        },
-        condition: CONDITION_MAP[listing.condition.toLowerCase()] || 'USED_EXCELLENT',
-        availability: {
-          shipToLocationAvailability: {
-            quantity: 1,
-          },
-        },
-      }),
+      condition: CONDITION_MAP[listing.condition.toLowerCase()] || 'USED_EXCELLENT',
+      availability: {
+        shipToLocationAvailability: { quantity: 1 },
+      },
     });
 
     // Create offer
-    const offerResponse = await fetch(`${EBAY_API_URL}/sell/inventory/v1/offer`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Content-Language': 'en-US',
+    const offerResponse = await ebayPost('/sell/inventory/v1/offer', token, {
+      sku,
+      marketplaceId: 'EBAY_US',
+      format: 'FIXED_PRICE',
+      listingDescription: listing.description,
+      pricingSummary: {
+        price: { value: listing.price.toFixed(2), currency: 'USD' },
       },
-      body: JSON.stringify({
-        sku,
-        marketplaceId: 'EBAY_US',
-        format: 'FIXED_PRICE',
-        listingDescription: listing.description,
-        pricingSummary: {
-          price: { value: listing.price.toFixed(2), currency: 'USD' },
-        },
-        categoryId: listing.category || '175672',
-        listingPolicies: {},
-      }),
+      categoryId: listing.category || '175672',
+      listingPolicies: {},
     });
 
     const offerData = await offerResponse.json();
     if (!offerResponse.ok) throw new Error(offerData.message || 'Failed to create eBay offer');
 
     // Publish offer
-    const publishResponse = await fetch(
-      `${EBAY_API_URL}/sell/inventory/v1/offer/${offerData.offerId}/publish`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      }
+    const publishResponse = await ebayPost(
+      `/sell/inventory/v1/offer/${offerData.offerId}/publish`,
+      token,
+      {}
     );
 
     const publishData = await publishResponse.json();
@@ -157,19 +151,11 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async updateListing(externalId: string, listing: Partial<ListingData>, token: string): Promise<PlatformListing> {
-    // Simplified update — would need sku lookup in production
-    const response = await fetch(`${EBAY_API_URL}/sell/inventory/v1/offer/${externalId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        ...(listing.price && {
-          pricingSummary: { price: { value: listing.price.toFixed(2), currency: 'USD' } },
-        }),
-        ...(listing.description && { listingDescription: listing.description }),
+    const response = await ebayPost(`/sell/inventory/v1/offer/${externalId}`, token, {
+      ...(listing.price && {
+        pricingSummary: { price: { value: listing.price.toFixed(2), currency: 'USD' } },
       }),
+      ...(listing.description && { listingDescription: listing.description }),
     });
 
     if (!response.ok) {
@@ -185,21 +171,21 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async deleteListing(externalId: string, token: string): Promise<void> {
-    const response = await fetch(
-      `${EBAY_API_URL}/sell/inventory/v1/offer/${externalId}`,
-      {
+    // DELETE method through proxy
+    const response = await fetch('/api/ebay-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: `/sell/inventory/v1/offer/${externalId}`,
+        token,
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      }
-    );
+      }),
+    });
     if (!response.ok) throw new Error('Failed to delete eBay listing');
   },
 
   async getListings(_params: ListingsQuery, token: string): Promise<PlatformListing[]> {
-    const response = await fetch(`${EBAY_API_URL}/sell/inventory/v1/offer?limit=100`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-
+    const response = await ebayGet('/sell/inventory/v1/offer?limit=100', token);
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch listings');
 
@@ -213,11 +199,10 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async getSales(_params: SalesQuery, token: string): Promise<SoldItem[]> {
-    const response = await fetch(
-      `${EBAY_API_URL}/sell/fulfillment/v1/order?limit=50&orderBy=creationdate`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
+    const response = await ebayGet(
+      '/sell/fulfillment/v1/order?limit=50&orderBy=creationdate',
+      token
     );
-
     const data = await response.json();
     if (!response.ok) return [];
 
@@ -244,9 +229,9 @@ export const ebayAdapter: PlatformAdapter = {
       limit: '50',
     });
 
-    const insightsResponse = await fetch(
-      `${EBAY_API_URL}/buy/marketplace_insights/v1_beta/item_sales/search?${insightsParams}`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
+    const insightsResponse = await ebayGet(
+      `/buy/marketplace_insights/v1_beta/item_sales/search?${insightsParams}`,
+      token
     );
 
     if (insightsResponse.ok) {
@@ -270,9 +255,9 @@ export const ebayAdapter: PlatformAdapter = {
       limit: '50',
     });
 
-    const response = await fetch(
-      `${EBAY_API_URL}/buy/browse/v1/item_summary/search?${params}`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
+    const response = await ebayGet(
+      `/buy/browse/v1/item_summary/search?${params}`,
+      token
     );
 
     const data = await response.json();
@@ -290,17 +275,10 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async searchByImage(imageUrl: string, token: string): Promise<SoldItem[]> {
-    // eBay Browse API image search
-    const response = await fetch(
-      `${EBAY_API_URL}/buy/browse/v1/item_summary/search_by_image`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ image: imageUrl }),
-      }
+    const response = await ebayPost(
+      '/buy/browse/v1/item_summary/search_by_image',
+      token,
+      { image: imageUrl }
     );
 
     const data = await response.json();
@@ -335,7 +313,6 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   mapCategory(category: string): string {
-    // Basic category mapping — would be expanded with eBay category tree
     const categoryMap: Record<string, string> = {
       'clothing': '11450',
       'shoes': '93427',
