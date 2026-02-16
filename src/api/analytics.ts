@@ -117,20 +117,62 @@ export const analyticsApi = {
   },
 
   /**
+   * Ensure the platform token is fresh; refresh if expired.
+   * Returns the valid access token or null if refresh fails.
+   */
+  async _ensureFreshToken(platformId: Parameters<typeof getPlatform>[0]): Promise<string | null> {
+    const store = usePlatformStore.getState();
+    const connection = store.connections[platformId];
+    if (!connection) return null;
+
+    // Check if token expires within the next 5 minutes
+    const expiresAt = new Date(connection.tokenExpiresAt).getTime();
+    const buffer = 5 * 60 * 1000;
+    if (Date.now() < expiresAt - buffer) {
+      return connection.accessToken;
+    }
+
+    // Token expired or expiring soon — refresh it
+    console.log(`[sync] Refreshing expired ${platformId} token...`);
+    try {
+      const adapter = getPlatform(platformId);
+      const newTokens = await adapter.refreshToken(connection.refreshToken);
+      store.setConnection(platformId, {
+        ...connection,
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken,
+        tokenExpiresAt: newTokens.expiresAt,
+      });
+      console.log(`[sync] ${platformId} token refreshed successfully`);
+      return newTokens.accessToken;
+    } catch (err) {
+      console.error(`[sync] Failed to refresh ${platformId} token:`, err);
+      return null;
+    }
+  },
+
+  /**
    * Sync sales from all connected platforms into Supabase.
    * Fetches orders from each platform API and upserts them.
    */
-  async syncPlatformSales(startDate?: string): Promise<{ synced: number; total: number }> {
+  async syncPlatformSales(startDate?: string): Promise<{ synced: number; total: number; errors: string[] }> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
-    const { isConnected, getToken } = usePlatformStore.getState();
+    const { isConnected } = usePlatformStore.getState();
     let totalSynced = 0;
     let totalFetched = 0;
+    const errors: string[] = [];
 
     for (const platformId of getPlatformIds()) {
-      const token = getToken(platformId);
-      if (!token || !isConnected(platformId)) continue;
+      if (!isConnected(platformId)) continue;
+
+      // Refresh token if expired
+      const token = await analyticsApi._ensureFreshToken(platformId);
+      if (!token) {
+        errors.push(`${platformId}: token expired — reconnect in Settings`);
+        continue;
+      }
 
       try {
         const adapter = getPlatform(platformId);
@@ -139,6 +181,7 @@ export const analyticsApi = {
           token
         );
 
+        console.log(`[sync] ${platformId}: fetched ${platformSales.length} sales`);
         totalFetched += platformSales.length;
 
         if (platformSales.length === 0) continue;
@@ -170,16 +213,19 @@ export const analyticsApi = {
             );
 
           if (error) {
-            console.error(`Failed to upsert sale ${item.orderId}:`, error);
+            console.error(`[sync] Failed to upsert sale ${item.orderId}:`, error);
           } else {
             totalSynced++;
           }
         }
       } catch (err) {
-        console.error(`Failed to sync ${platformId} sales:`, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[sync] Failed to sync ${platformId} sales:`, msg);
+        errors.push(`${platformId}: ${msg}`);
       }
     }
 
-    return { synced: totalSynced, total: totalFetched };
+    console.log(`[sync] Done — synced ${totalSynced}/${totalFetched}, errors: ${errors.length}`);
+    return { synced: totalSynced, total: totalFetched, errors };
   },
 };

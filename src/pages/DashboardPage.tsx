@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
@@ -26,18 +26,25 @@ export default function DashboardPage() {
   } = useAnalyticsStore();
   const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
+  const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const syncAndLoad = async () => {
+      setSyncError('');
+
       // Sync platform sales first
       setSyncing(true);
       try {
-        await analyticsApi.syncPlatformSales();
+        const result = await analyticsApi.syncPlatformSales();
         setLastSyncedAt(new Date().toISOString());
+        if (result.errors.length > 0) {
+          setSyncError(result.errors.join('; '));
+        }
       } catch (err) {
         console.error('Dashboard sync error:', err);
+        setSyncError(err instanceof Error ? err.message : 'Sync failed');
       } finally {
         setSyncing(false);
       }
@@ -131,6 +138,30 @@ export default function DashboardPage() {
           <div className="stat-value">{totalItems()}</div>
         </div>
       </div>
+
+      {syncError && (
+        <div style={{
+          padding: '10px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          background: 'rgba(255,59,48,0.1)',
+          border: '1px solid var(--neon-red)',
+          color: 'var(--neon-red)',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span>Sync issue: {syncError}</span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate('/settings')}
+            style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--neon-cyan)' }}
+          >
+            Settings
+          </button>
+        </div>
+      )}
 
       {/* Recent Sales */}
       <div className="card" style={{ marginBottom: 24 }}>

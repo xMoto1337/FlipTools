@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
 import { analyticsApi } from '../api/analytics';
@@ -36,17 +36,23 @@ export default function AnalyticsPage() {
 
   const { isFree } = useSubscription();
   const { allowed: advancedAllowed } = useFeatureGate('advanced-analytics');
+  const [syncError, setSyncError] = useState('');
 
   const syncAndLoad = async () => {
     if (!isAuthenticated) return;
+    setSyncError('');
 
     // Sync platform sales first
     setSyncing(true);
     try {
-      await analyticsApi.syncPlatformSales(getDateRangeStart());
+      const result = await analyticsApi.syncPlatformSales(getDateRangeStart());
       setLastSyncedAt(new Date().toISOString());
+      if (result.errors.length > 0) {
+        setSyncError(result.errors.join('; '));
+      }
     } catch (err) {
       console.error('Sync error:', err);
+      setSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncing(false);
     }
@@ -121,6 +127,20 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {syncError && (
+        <div style={{
+          padding: '10px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          background: 'rgba(255,59,48,0.1)',
+          border: '1px solid var(--neon-red)',
+          color: 'var(--neon-red)',
+          fontSize: 13,
+        }}>
+          Sync issue: {syncError}
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="stat-card">

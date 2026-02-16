@@ -226,7 +226,13 @@ export const ebayAdapter: PlatformAdapter = {
         token
       );
       const data = await response.json();
-      if (!response.ok) break;
+      if (!response.ok) {
+        console.error('[ebay] getSales error:', response.status, data);
+        if (response.status === 401) {
+          throw new Error('eBay token expired');
+        }
+        break;
+      }
 
       const orders = data.orders || [];
       if (orders.length === 0) break;
