@@ -430,11 +430,13 @@ export const ebayAdapter: PlatformAdapter = {
         const sampleNet = Number((sample.amount as Record<string, string>)?.value || 0);
         const sampleFees = Math.abs(Number((sample.totalFeeAmount as Record<string, string>)?.value || 0));
         const sampleGross = Number((sample.totalFeeBasisAmount as Record<string, string>)?.value || 0);
-        console.log('[ebay] Sample Finances transaction:', {
+        console.log('[ebay] Sample Finances transaction:', JSON.stringify(sample, null, 2));
+        console.log('[ebay] Parsed values:', {
           orderId: sample.orderId,
           gross: sampleGross,
           fees: sampleFees,
           netPayout: sampleNet,
+          allDeductions: sampleGross - sampleNet,
           check: `gross(${sampleGross}) - fees(${sampleFees}) = ${(sampleGross - sampleFees).toFixed(2)} vs net(${sampleNet})`,
         });
       }
@@ -443,28 +445,36 @@ export const ebayAdapter: PlatformAdapter = {
         const orderId = tx.orderId as string;
         if (!orderId) continue;
 
-        // amount = the NET payout to seller (after eBay deducts all fees, shipping labels, etc.)
-        // This is the actual money that hits the seller's bank account.
-        // totalFeeBasisAmount = gross basis for fee calculation (NOT reliable as "sale price")
-        // totalFeeAmount = fees eBay charged (negative)
-        const netPayout = Number((tx.amount as Record<string, string>)?.value || 0);
+        // Finances API fields:
+        // - totalFeeBasisAmount = gross sale (item + shipping, what buyer paid excl. tax)
+        // - totalFeeAmount = eBay fees (negative number)
+        // - amount = net payout (after ALL deductions: fees, shipping labels, promotions)
+        const grossAmount = Number((tx.totalFeeBasisAmount as Record<string, string>)?.value || 0);
+        const netAmount = Number((tx.amount as Record<string, string>)?.value || 0);
+        const feeAmount = Math.abs(Number((tx.totalFeeAmount as Record<string, string>)?.value || 0));
+
+        // Calculate ALL deductions (fees + shipping labels + promotions + everything eBay took)
+        // allDeductions = gross - net = everything between what buyer paid and what seller receives
+        const allDeductions = grossAmount > 0 && netAmount > 0
+          ? grossAmount - netAmount
+          : feeAmount; // fallback to just fees if gross/net not available
 
         // Get order details from fulfillment data
         const orderInfo = orderMap.get(orderId);
 
-        // Use net payout as sale_price with fees=0 so profit = net_payout - cost
-        // This gives the most accurate "what you actually earned" number
-        // The gross and fees are stored for display purposes
+        // Store gross as sale_price, all deductions as platform_fees
+        // Supabase profit = sale_price - shipping_cost - platform_fees - cost
+        // = gross - 0 - allDeductions - cost = net_payout - cost
         allOrders.push({
           title: orderInfo?.title || 'eBay Sale',
-          price: netPayout,
+          price: grossAmount || netAmount,  // sale_price = gross (what buyer paid)
           soldDate: (tx.transactionDate as string) || orderInfo?.creationDate || '',
           condition: '',
           imageUrl: orderInfo?.imageUrl || '',
           url: '',
           platform: 'ebay',
           shippingCost: 0,
-          platformFees: 0,
+          platformFees: Math.round(allDeductions * 100) / 100,  // everything eBay deducted
           buyerUsername: orderInfo?.buyerUsername || undefined,
           orderId,
         });
