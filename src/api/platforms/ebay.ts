@@ -304,35 +304,43 @@ export const ebayAdapter: PlatformAdapter = {
 
       for (const order of orders) {
         const lineItems = (order.lineItems as Record<string, unknown>[]) || [];
-        const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
+        const pricing = (order.pricingSummary || {}) as Record<string, unknown>;
         const buyer = (order.buyer as Record<string, string>) || {};
-        const paymentSummary = (order.paymentSummary as Record<string, unknown>) || {};
+        const paymentSummary = (order.paymentSummary || {}) as Record<string, unknown>;
 
         const firstItem = lineItems[0] || {};
         const title = (firstItem.title as string) || 'Unknown Item';
         const itemImage = ((firstItem.image as Record<string, string>)?.imageUrl) || '';
         const fullTitle = lineItems.length > 1 ? `${title} (+${lineItems.length - 1} more)` : title;
 
+        // Log raw pricing and payment data for debugging
+        console.log(`[ebay] Order ${order.orderId} raw pricing:`, JSON.stringify(pricing));
+        console.log(`[ebay] Order ${order.orderId} raw paymentSummary:`, JSON.stringify(paymentSummary));
+
         // Gross sale = item subtotal + delivery (what buyer paid minus tax)
-        const subtotal = Number(pricing.priceSubtotal?.value || 0);
+        const priceSubtotal = pricing.priceSubtotal as Record<string, string> | undefined;
+        const subtotal = Number(priceSubtotal?.value || 0);
+
         // deliveryCost can be nested: { shippingCost: { value, currency } } or flat { value, currency }
-        const deliveryCostObj = pricing.deliveryCost as unknown as Record<string, unknown> || {};
+        const deliveryCostObj = (pricing.deliveryCost || {}) as Record<string, unknown>;
         const delivery = Number(
           (deliveryCostObj?.shippingCost as Record<string, string>)?.value
-          || (deliveryCostObj?.value as string)
+          || (deliveryCostObj as Record<string, string>)?.value
           || 0
         );
         const grossSale = subtotal + delivery;
 
+        // Also grab pricingSummary.total as a cross-check
+        const pricingTotal = Number((pricing.total as Record<string, string>)?.value || 0);
+
         // Try to get actual payout from paymentSummary
-        // The payments array contains actual amounts transferred to seller
         const payments = (paymentSummary.payments as Array<Record<string, unknown>>) || [];
         const totalDueSeller = paymentSummary.totalDueSeller as Record<string, string> | undefined;
 
         let actualPayout = 0;
         let hasPayoutData = false;
 
-        // Method 1: totalDueSeller (most direct — what eBay owes the seller)
+        // Method 1: totalDueSeller (what eBay owes the seller)
         if (totalDueSeller?.value) {
           actualPayout = Number(totalDueSeller.value);
           hasPayoutData = true;
@@ -348,24 +356,26 @@ export const ebayAdapter: PlatformAdapter = {
           }
         }
 
+        console.log(`[ebay] Order ${order.orderId}: subtotal=$${subtotal}, delivery=$${delivery}, gross=$${grossSale}, pricingTotal=$${pricingTotal}, payout=$${actualPayout}, hasPayoutData=${hasPayoutData}`);
+
         let salePrice: number;
         let platformFees: number;
         let shippingCost: number;
 
         if (hasPayoutData && actualPayout > 0) {
           // We have actual payout data — compute all deductions
-          // allDeductions = everything eBay deducted (fees + shipping labels + promotions)
           const allDeductions = grossSale - actualPayout;
           salePrice = grossSale;
           platformFees = Math.max(0, Math.round(allDeductions * 100) / 100);
           shippingCost = 0; // included in allDeductions
-          console.log(`[ebay] Order ${order.orderId}: gross=$${grossSale}, payout=$${actualPayout}, deductions=$${allDeductions.toFixed(2)}`);
+          console.log(`[ebay] Order ${order.orderId}: PAYOUT MODE — fees=$${platformFees}, profit will be $${(grossSale - platformFees).toFixed(2)}`);
         } else {
           // No payout data — use estimated fees
           const fees = ebayAdapter.calculateFees(grossSale);
           salePrice = grossSale;
           platformFees = fees.totalFees;
           shippingCost = 0;
+          console.log(`[ebay] Order ${order.orderId}: ESTIMATED MODE — fees=$${platformFees}, profit will be $${(grossSale - platformFees).toFixed(2)}`);
         }
 
         allOrders.push({
