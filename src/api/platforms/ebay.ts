@@ -273,7 +273,8 @@ export const ebayAdapter: PlatformAdapter = {
     });
 
     // Always pass a date filter — without one, eBay only returns ~90 days
-    const startDate = params.startDate || new Date(Date.now() - 3 * 365 * 86400000).toISOString();
+    // Default to 2018 (when eBay Managed Payments started) to get all historical orders
+    const startDate = params.startDate || '2018-01-01T00:00:00.000Z';
     fulfillmentParams.set('filter', `creationdate:[${new Date(startDate).toISOString()}..${new Date().toISOString()}]`);
 
     const allOrders: SoldItem[] = [];
