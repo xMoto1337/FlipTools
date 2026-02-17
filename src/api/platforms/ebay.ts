@@ -315,7 +315,13 @@ export const ebayAdapter: PlatformAdapter = {
 
         // Gross sale = item subtotal + delivery (what buyer paid minus tax)
         const subtotal = Number(pricing.priceSubtotal?.value || 0);
-        const delivery = Number(pricing.deliveryCost?.value || 0);
+        // deliveryCost can be nested: { shippingCost: { value, currency } } or flat { value, currency }
+        const deliveryCostObj = pricing.deliveryCost as unknown as Record<string, unknown> || {};
+        const delivery = Number(
+          (deliveryCostObj?.shippingCost as Record<string, string>)?.value
+          || (deliveryCostObj?.value as string)
+          || 0
+        );
         const grossSale = subtotal + delivery;
 
         // Try to get actual payout from paymentSummary
