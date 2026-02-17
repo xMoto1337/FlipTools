@@ -233,13 +233,18 @@ export const ebayAdapter: PlatformAdapter = {
       if (items.length === 0) break;
 
       for (const item of items) {
+        // Use full PictureURLs first, fall back to gallery thumbnail
+        const images = (item.imageUrls && item.imageUrls.length > 0)
+          ? item.imageUrls
+          : (item.galleryUrl ? [item.galleryUrl] : []);
+
         allListings.push({
           externalId: item.itemId,
           url: item.viewItemUrl || `https://www.ebay.com/itm/${item.itemId}`,
           status: 'active',
           title: item.title || '',
           price: item.currentPrice || 0,
-          images: item.imageUrl ? [item.imageUrl] : [],
+          images,
           condition: item.conditionDisplayName || '',
           platformData: {
             listingType: item.listingType,

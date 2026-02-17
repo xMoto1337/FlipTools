@@ -155,9 +155,18 @@ export const listingsApi = {
 
   /**
    * Sync listings from all connected platforms into Supabase.
-   * Fetches active listings from each platform API and upserts them.
+   * Caches sync time — only re-fetches from platform APIs every 10 minutes.
+   * Pass force=true to bypass the cache.
    */
-  async syncPlatformListings(): Promise<{ synced: number; total: number; errors: string[] }> {
+  async syncPlatformListings(force = false): Promise<{ synced: number; total: number; errors: string[] }> {
+    const SYNC_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    const lastSync = Number(localStorage.getItem('fliptools_listings_last_sync') || '0');
+
+    if (!force && Date.now() - lastSync < SYNC_INTERVAL) {
+      console.log('[sync] Listings: skipping — last sync was', Math.round((Date.now() - lastSync) / 1000), 's ago');
+      return { synced: 0, total: 0, errors: [] };
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
@@ -286,6 +295,9 @@ export const listingsApi = {
         errors.push(`${platformId}: ${msg}`);
       }
     }
+
+    // Save sync timestamp so we don't re-fetch on every navigation
+    localStorage.setItem('fliptools_listings_last_sync', String(Date.now()));
 
     console.log(`[sync] Listings done — synced ${totalSynced}/${totalFetched}, errors: ${errors.length}`);
     return { synced: totalSynced, total: totalFetched, errors };

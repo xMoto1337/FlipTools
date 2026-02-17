@@ -136,7 +136,8 @@ function parseGetMyeBaySelling(xml: string): {
     itemId: string;
     title: string;
     currentPrice: number;
-    imageUrl: string;
+    imageUrls: string[];
+    galleryUrl: string;
     viewItemUrl: string;
     listingType: string;
     quantity: number;
@@ -152,7 +153,8 @@ function parseGetMyeBaySelling(xml: string): {
     itemId: string;
     title: string;
     currentPrice: number;
-    imageUrl: string;
+    imageUrls: string[];
+    galleryUrl: string;
     viewItemUrl: string;
     listingType: string;
     quantity: number;
@@ -188,14 +190,23 @@ function parseGetMyeBaySelling(xml: string): {
       return m ? m[1].trim() : '';
     };
 
-    // Get first PictureURL (there may be multiple)
-    const picMatch = itemXml.match(/<PictureURL>([^<]+)<\/PictureURL>/);
+    // Collect ALL PictureURLs (there are usually multiple per listing)
+    const picMatches = itemXml.match(/<PictureURL>([^<]+)<\/PictureURL>/g) || [];
+    const imageUrls = picMatches.map(m => {
+      const urlMatch = m.match(/<PictureURL>([^<]+)<\/PictureURL>/);
+      return urlMatch ? urlMatch[1] : '';
+    }).filter(Boolean);
+
+    // GalleryURL is the thumbnail
+    const galleryMatch = itemXml.match(/<GalleryURL>([^<]+)<\/GalleryURL>/);
+    const galleryUrl = galleryMatch ? galleryMatch[1] : '';
 
     items.push({
       itemId: get('ItemID'),
       title: decodeXmlEntities(get('Title')),
       currentPrice: Number(get('CurrentPrice') || 0),
-      imageUrl: picMatch ? picMatch[1] : '',
+      imageUrls,
+      galleryUrl,
       viewItemUrl: get('ViewItemURL'),
       listingType: get('ListingType'),
       quantity: Number(get('Quantity') || 0),

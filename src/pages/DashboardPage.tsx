@@ -56,7 +56,7 @@ export default function DashboardPage() {
         const [salesStats, salesData, allListings] = await Promise.all([
           analyticsApi.getStats(),
           analyticsApi.getSales({ limit: 10 }),
-          listingsApi.getAll({ limit: 50 }),
+          listingsApi.getAll(),
         ]);
         setStats(salesStats);
         setSales(salesData);
