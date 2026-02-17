@@ -45,78 +45,6 @@ async function ebayPost(endpoint: string, token: string, payload: unknown): Prom
   return resp;
 }
 
-/**
- * Fallback: get sales using only the Fulfillment API with estimated fees.
- * Used when the Finances API scope hasn't been authorized yet.
- */
-async function getSalesFromFulfillmentOnly(params: SalesQuery, token: string): Promise<SoldItem[]> {
-  const queryParams = new URLSearchParams({
-    limit: String(params.limit || 200),
-    orderBy: 'creationdate',
-  });
-
-  const filters: string[] = [];
-  if (params.startDate) {
-    filters.push(`creationdate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`);
-  }
-  if (filters.length > 0) {
-    queryParams.set('filter', filters.join(','));
-  }
-
-  const allOrders: SoldItem[] = [];
-  let offset = 0;
-  const limit = params.limit || 200;
-
-  while (true) {
-    queryParams.set('offset', String(offset));
-    const response = await ebayGet(`/sell/fulfillment/v1/order?${queryParams}`, token);
-    const data = await response.json();
-    if (!response.ok) {
-      if (response.status === 401) throw new Error('eBay token expired');
-      break;
-    }
-
-    const orders = data.orders || [];
-    if (orders.length === 0) break;
-
-    for (const order of orders) {
-      const lineItems = (order.lineItems as Record<string, unknown>[]) || [];
-      const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
-      const buyer = (order.buyer as Record<string, string>) || {};
-
-      const subtotal = Number(pricing.priceSubtotal?.value || 0);
-      const delivery = Number(pricing.deliveryCost?.value || 0);
-      const salePrice = subtotal + delivery;
-
-      // Use estimated fees as fallback
-      const fees = ebayAdapter.calculateFees(salePrice);
-
-      const firstItem = lineItems[0] || {};
-      const title = (firstItem.title as string) || 'Unknown Item';
-      const itemImage = ((firstItem.image as Record<string, string>)?.imageUrl) || '';
-      const fullTitle = lineItems.length > 1 ? `${title} (+${lineItems.length - 1} more)` : title;
-
-      allOrders.push({
-        title: fullTitle,
-        price: salePrice,
-        soldDate: (order.creationDate as string) || '',
-        condition: '',
-        imageUrl: itemImage,
-        url: '',
-        platform: 'ebay',
-        shippingCost: 0,
-        platformFees: fees.totalFees,
-        buyerUsername: buyer.username || undefined,
-        orderId: order.orderId as string,
-      });
-    }
-
-    if (orders.length < limit) break;
-    offset += orders.length;
-  }
-
-  return allOrders;
-}
 
 export const ebayAdapter: PlatformAdapter = {
   name: 'eBay',
@@ -337,7 +265,8 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async getSales(params: SalesQuery, token: string): Promise<SoldItem[]> {
-    // Step 1: Fetch orders from Fulfillment API for item details (title, image, buyer)
+    // Fetch orders from Fulfillment API — contains ALL info we need:
+    // item details, pricing, payment summary with actual seller payouts
     const fulfillmentParams = new URLSearchParams({
       limit: String(params.limit || 200),
       orderBy: 'creationdate',
@@ -351,8 +280,7 @@ export const ebayAdapter: PlatformAdapter = {
       fulfillmentParams.set('filter', filters.join(','));
     }
 
-    // Fetch all orders from Fulfillment API
-    const orderMap = new Map<string, { title: string; imageUrl: string; buyerUsername: string; creationDate: string }>();
+    const allOrders: SoldItem[] = [];
     let offset = 0;
     const limit = params.limit || 200;
 
@@ -369,19 +297,83 @@ export const ebayAdapter: PlatformAdapter = {
       const orders = data.orders || [];
       if (orders.length === 0) break;
 
+      // Log first order for debugging — shows all available fields
+      if (allOrders.length === 0 && orders.length > 0) {
+        console.log('[ebay] Sample order (full):', JSON.stringify(orders[0], null, 2));
+      }
+
       for (const order of orders) {
         const lineItems = (order.lineItems as Record<string, unknown>[]) || [];
+        const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
         const buyer = (order.buyer as Record<string, string>) || {};
+        const paymentSummary = (order.paymentSummary as Record<string, unknown>) || {};
+
         const firstItem = lineItems[0] || {};
         const title = (firstItem.title as string) || 'Unknown Item';
         const itemImage = ((firstItem.image as Record<string, string>)?.imageUrl) || '';
         const fullTitle = lineItems.length > 1 ? `${title} (+${lineItems.length - 1} more)` : title;
 
-        orderMap.set(order.orderId as string, {
+        // Gross sale = item subtotal + delivery (what buyer paid minus tax)
+        const subtotal = Number(pricing.priceSubtotal?.value || 0);
+        const delivery = Number(pricing.deliveryCost?.value || 0);
+        const grossSale = subtotal + delivery;
+
+        // Try to get actual payout from paymentSummary
+        // The payments array contains actual amounts transferred to seller
+        const payments = (paymentSummary.payments as Array<Record<string, unknown>>) || [];
+        const totalDueSeller = paymentSummary.totalDueSeller as Record<string, string> | undefined;
+
+        let actualPayout = 0;
+        let hasPayoutData = false;
+
+        // Method 1: totalDueSeller (most direct — what eBay owes the seller)
+        if (totalDueSeller?.value) {
+          actualPayout = Number(totalDueSeller.value);
+          hasPayoutData = true;
+        }
+        // Method 2: sum of payment amounts
+        else if (payments.length > 0) {
+          for (const payment of payments) {
+            const paymentAmount = (payment.amount as Record<string, string>)?.value;
+            if (paymentAmount) {
+              actualPayout += Number(paymentAmount);
+              hasPayoutData = true;
+            }
+          }
+        }
+
+        let salePrice: number;
+        let platformFees: number;
+        let shippingCost: number;
+
+        if (hasPayoutData && actualPayout > 0) {
+          // We have actual payout data — compute all deductions
+          // allDeductions = everything eBay deducted (fees + shipping labels + promotions)
+          const allDeductions = grossSale - actualPayout;
+          salePrice = grossSale;
+          platformFees = Math.max(0, Math.round(allDeductions * 100) / 100);
+          shippingCost = 0; // included in allDeductions
+          console.log(`[ebay] Order ${order.orderId}: gross=$${grossSale}, payout=$${actualPayout}, deductions=$${allDeductions.toFixed(2)}`);
+        } else {
+          // No payout data — use estimated fees
+          const fees = ebayAdapter.calculateFees(grossSale);
+          salePrice = grossSale;
+          platformFees = fees.totalFees;
+          shippingCost = 0;
+        }
+
+        allOrders.push({
           title: fullTitle,
+          price: salePrice,
+          soldDate: (order.creationDate as string) || '',
+          condition: '',
           imageUrl: itemImage,
-          buyerUsername: buyer.username || '',
-          creationDate: (order.creationDate as string) || '',
+          url: '',
+          platform: 'ebay',
+          shippingCost,
+          platformFees,
+          buyerUsername: buyer.username || undefined,
+          orderId: order.orderId as string,
         });
       }
 
@@ -389,109 +381,10 @@ export const ebayAdapter: PlatformAdapter = {
       offset += orders.length;
     }
 
-    // Step 2: Fetch ALL transaction types from Finances API
-    // SALE = order revenue + marketplace fees
-    // SHIPPING_LABEL = shipping label costs (deducted from payout)
-    // We need both to compute accurate profit
-    const saleTxMap = new Map<string, { gross: number; fees: number; date: string }>();
-    const shippingCostMap = new Map<string, number>();
-    let financesWorked = false;
+    // Clear the finances fallback flag since we don't need the Finances API anymore
+    try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
 
-    for (const txType of ['SALE', 'SHIPPING_LABEL']) {
-      let txOffset = 0;
-
-      while (true) {
-        const dateFilter = params.startDate
-          ? `,transactionDate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`
-          : '';
-        const txParams = new URLSearchParams({
-          limit: '200',
-          offset: String(txOffset),
-          filter: `transactionType:{${txType}}${dateFilter}`,
-        });
-
-        const txResponse = await ebayGet(`/sell/finances/v1/transaction?${txParams}`, token);
-        const txData = await txResponse.json();
-
-        if (!txResponse.ok) {
-          console.warn(`[ebay] Finances API error (${txType}):`, txResponse.status, txData);
-          if (txType === 'SALE') {
-            // Finances API not authorized — fall back
-            try { localStorage.setItem('fliptools_ebay_finances_fallback', 'true'); } catch {}
-            if (orderMap.size > 0) {
-              console.log('[ebay] Falling back to Fulfillment API with estimated fees');
-              return getSalesFromFulfillmentOnly(params, token);
-            }
-            return [];
-          }
-          break; // SHIPPING_LABEL failed — just skip it, fees alone are still useful
-        }
-
-        const transactions = txData.transactions || [];
-        if (transactions.length === 0) break;
-
-        if (txType === 'SALE' && txOffset === 0) {
-          financesWorked = true;
-          // Log first SALE transaction for debugging
-          const sample = transactions[0];
-          console.log('[ebay] Sample SALE transaction:', JSON.stringify(sample, null, 2));
-        }
-
-        for (const tx of transactions) {
-          const orderId = tx.orderId as string;
-          if (!orderId) continue;
-
-          if (txType === 'SALE') {
-            const gross = Number((tx.totalFeeBasisAmount as Record<string, string>)?.value || 0)
-              || Number((tx.amount as Record<string, string>)?.value || 0);
-            const fees = Math.abs(Number((tx.totalFeeAmount as Record<string, string>)?.value || 0));
-            const date = (tx.transactionDate as string) || '';
-            saleTxMap.set(orderId, { gross, fees, date });
-          } else {
-            // SHIPPING_LABEL: amount is negative (cost to seller)
-            const labelCost = Math.abs(Number((tx.amount as Record<string, string>)?.value || 0));
-            const existing = shippingCostMap.get(orderId) || 0;
-            shippingCostMap.set(orderId, existing + labelCost);
-          }
-        }
-
-        if (transactions.length < 200) break;
-        txOffset += transactions.length;
-      }
-    }
-
-    // Combine SALE + SHIPPING_LABEL data per order
-    const allOrders: SoldItem[] = [];
-
-    for (const [orderId, sale] of saleTxMap) {
-      const orderInfo = orderMap.get(orderId);
-      const shippingLabel = shippingCostMap.get(orderId) || 0;
-
-      // sale_price = gross (what buyer paid excl. tax)
-      // platform_fees = eBay marketplace fees (FVF, payment processing, etc.)
-      // shipping_cost = shipping label purchased through eBay
-      // Supabase: profit = sale_price - shipping_cost - platform_fees - cost
-      //                   = gross - label - fees - cost = actual net payout - cost
-      allOrders.push({
-        title: orderInfo?.title || 'eBay Sale',
-        price: sale.gross,
-        soldDate: sale.date || orderInfo?.creationDate || '',
-        condition: '',
-        imageUrl: orderInfo?.imageUrl || '',
-        url: '',
-        platform: 'ebay',
-        shippingCost: Math.round(shippingLabel * 100) / 100,
-        platformFees: Math.round(sale.fees * 100) / 100,
-        buyerUsername: orderInfo?.buyerUsername || undefined,
-        orderId,
-      });
-    }
-
-    if (financesWorked) {
-      try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
-    }
-
-    console.log(`[ebay] getSales: ${allOrders.length} sales, ${shippingCostMap.size} shipping labels from Finances API`);
+    console.log(`[ebay] getSales: ${allOrders.length} orders from Fulfillment API`);
     return allOrders;
   },
 
