@@ -295,44 +295,59 @@ export default function ListingsPage() {
         </div>
       ) : viewMode === 'grid' ? (
         <div className="listing-grid">
-          {paginated.map((listing) => (
-            <div
-              key={listing.id}
-              className={`listing-card ${selectedIds.has(listing.id) ? 'selected' : ''}`}
-              onClick={() => toggleSelect(listing.id)}
-            >
-              {listing.images[0] ? (
-                <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
-              ) : (
-                <div className="listing-image-placeholder">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                </div>
-              )}
-              <div className="listing-body">
-                <div className="listing-title">{listing.title}</div>
-                <div className="listing-price">{formatCurrency(listing.price || 0)}</div>
-                <div className="listing-meta">
-                  <span className={`status-badge ${listing.status}`}>
-                    <span className="status-dot" />
-                    {listing.status}
-                  </span>
-                  {listing.condition && (
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{listing.condition}</span>
-                  )}
-                </div>
-                {listing.category && (
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                    {listing.category.charAt(0).toUpperCase() + listing.category.slice(1)}
+          {paginated.map((listing) => {
+            const platformEntries = Object.entries(listing.platforms);
+            const firstPlatformUrl = platformEntries.length > 0 ? (platformEntries[0][1] as { url?: string })?.url : null;
+
+            return (
+              <div
+                key={listing.id}
+                className={`listing-card ${selectedIds.has(listing.id) ? 'selected' : ''}`}
+                onClick={() => toggleSelect(listing.id)}
+              >
+                {listing.images[0] ? (
+                  <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
+                ) : (
+                  <div className="listing-image-placeholder">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                   </div>
                 )}
-                <div className="listing-platforms">
-                  {Object.keys(listing.platforms).map((p) => (
-                    <span key={p} className={`platform-badge ${p}`}>{p}</span>
-                  ))}
+                <div className="listing-body">
+                  <div className="listing-title">{listing.title}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="listing-price">{formatCurrency(listing.price || 0)}</div>
+                    {firstPlatformUrl && (
+                      <a
+                        href={firstPlatformUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-ghost btn-sm"
+                        title="View on platform"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ padding: '2px 6px', fontSize: 11 }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    )}
+                  </div>
+                  <div className="listing-meta">
+                    <span className={`status-badge ${listing.status}`}>
+                      <span className="status-dot" />
+                      {listing.status}
+                    </span>
+                    {listing.condition && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{listing.condition}</span>
+                    )}
+                  </div>
+                  <div className="listing-platforms">
+                    {Object.keys(listing.platforms).map((p) => (
+                      <span key={p} className={`platform-badge ${p}`}>{p}</span>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -356,42 +371,64 @@ export default function ListingsPage() {
                 <th>Category</th>
                 <th>Platforms</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => handleSort('created_at')}>
-                  Created <SortIcon field="created_at" />
+                  Listed <SortIcon field="created_at" />
                 </th>
+                <th style={{ width: 60 }}></th>
               </tr>
             </thead>
             <tbody>
-              {paginated.map((listing) => (
-                <tr key={listing.id}>
-                  <td className="checkbox-cell">
-                    <input type="checkbox" className="table-checkbox" checked={selectedIds.has(listing.id)} onChange={() => toggleSelect(listing.id)} />
-                  </td>
-                  <td style={{ padding: '8px' }}>
-                    {listing.images[0] ? (
-                      <img src={listing.images[0]} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} loading="lazy" />
-                    ) : (
-                      <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              {paginated.map((listing) => {
+                // Get the first platform URL for "View" link
+                const platformEntries = Object.entries(listing.platforms);
+                const firstPlatformUrl = platformEntries.length > 0 ? (platformEntries[0][1] as { url?: string })?.url : null;
+
+                return (
+                  <tr key={listing.id}>
+                    <td className="checkbox-cell">
+                      <input type="checkbox" className="table-checkbox" checked={selectedIds.has(listing.id)} onChange={() => toggleSelect(listing.id)} />
+                    </td>
+                    <td style={{ padding: '8px' }}>
+                      {listing.images[0] ? (
+                        <img src={listing.images[0]} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} loading="lazy" />
+                      ) : (
+                        <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ maxWidth: 250 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</div>
+                    </td>
+                    <td style={{ fontWeight: 600, color: 'var(--neon-green)' }}>{formatCurrency(listing.price || 0)}</td>
+                    <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.condition || '—'}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.category ? listing.category.charAt(0).toUpperCase() + listing.category.slice(1) : '—'}</td>
+                    <td>
+                      <div className="listing-platforms" style={{ marginTop: 0 }}>
+                        {Object.keys(listing.platforms).map((p) => (
+                          <span key={p} className={`platform-badge ${p}`}>{p}</span>
+                        ))}
                       </div>
-                    )}
-                  </td>
-                  <td style={{ maxWidth: 250 }}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</div>
-                  </td>
-                  <td style={{ fontWeight: 600, color: 'var(--neon-green)' }}>{formatCurrency(listing.price || 0)}</td>
-                  <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.condition || '—'}</td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.category ? listing.category.charAt(0).toUpperCase() + listing.category.slice(1) : '—'}</td>
-                  <td>
-                    <div className="listing-platforms" style={{ marginTop: 0 }}>
-                      {Object.keys(listing.platforms).map((p) => (
-                        <span key={p} className={`platform-badge ${p}`}>{p}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td style={{ color: 'var(--text-muted)' }}>{formatTimeAgo(listing.created_at)}</td>
-                </tr>
-              ))}
+                    </td>
+                    <td style={{ color: 'var(--text-muted)' }}>{formatTimeAgo(listing.created_at)}</td>
+                    <td>
+                      {firstPlatformUrl && (
+                        <a
+                          href={firstPlatformUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-ghost btn-sm"
+                          title="View on platform"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ padding: '4px 8px' }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

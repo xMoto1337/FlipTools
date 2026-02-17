@@ -186,25 +186,63 @@ export const analyticsApi = {
 
         if (platformSales.length === 0) continue;
 
-        // Get existing external_ids to avoid duplicates
-        // (PostgREST can't use partial unique indexes for onConflict)
+        // Get existing external_ids to separate new vs existing
         const orderIds = platformSales
           .map((s) => s.orderId)
           .filter((id): id is string => !!id);
 
         const { data: existing } = await supabase
           .from('sales')
-          .select('external_id')
+          .select('id, external_id')
           .eq('user_id', user.id)
           .eq('platform', platformId)
           .in('external_id', orderIds);
 
-        const existingIds = new Set((existing || []).map((r) => r.external_id));
+        const existingMap = new Map<string, string>();
+        for (const row of existing || []) {
+          if (row.external_id) existingMap.set(row.external_id, row.id);
+        }
 
-        // Insert only new sales
+        // Separate into new sales and existing sales that need updating
         const newSales = platformSales.filter(
-          (item) => item.orderId && !existingIds.has(item.orderId)
+          (item) => item.orderId && !existingMap.has(item.orderId)
         );
+        const existingSales = platformSales.filter(
+          (item) => item.orderId && existingMap.has(item.orderId)
+        );
+
+        // Update existing sales with correct prices/fees
+        if (existingSales.length > 0) {
+          console.log(`[sync] ${platformId}: updating ${existingSales.length} existing sales`);
+          for (const item of existingSales) {
+            const dbId = existingMap.get(item.orderId!);
+            if (!dbId) continue;
+
+            const { error: updateErr } = await supabase
+              .from('sales')
+              .update({
+                sale_price: item.price,
+                shipping_cost: item.shippingCost || 0,
+                platform_fees: item.platformFees || 0,
+                item_title: item.title,
+                item_image_url: item.imageUrl || null,
+                buyer_username: item.buyerUsername || null,
+                sold_at: item.soldDate || undefined,
+              })
+              .eq('id', dbId);
+
+            if (updateErr) {
+              console.error(`[sync] Sale update failed for ${item.orderId}:`, updateErr);
+            } else {
+              totalSynced++;
+            }
+          }
+        }
+
+        if (newSales.length === 0 && existingSales.length > 0) {
+          console.log(`[sync] ${platformId}: updated ${existingSales.length} sales, no new ones`);
+          continue;
+        }
 
         if (newSales.length === 0) {
           console.log(`[sync] ${platformId}: all ${platformSales.length} sales already synced`);

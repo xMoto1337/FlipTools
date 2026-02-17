@@ -51,7 +51,7 @@ interface ListingState {
 export const useListingStore = create<ListingState>()((set, get) => ({
   listings: [],
   selectedIds: new Set<string>(),
-  viewMode: 'grid',
+  viewMode: 'list',
   searchQuery: '',
   statusFilter: '',
   platformFilter: '',

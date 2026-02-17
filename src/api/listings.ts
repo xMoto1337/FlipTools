@@ -234,10 +234,12 @@ export const listingsApi = {
               price: item.price || undefined,
               images: item.images?.length ? item.images : undefined,
               platforms: platformInfo,
+              createdAt: item.createdAt,
+              condition: item.condition || undefined,
             });
           } else {
-            // Insert new listing
-            newListings.push({
+            // Insert new listing — use eBay startTime as created_at if available
+            const row: Record<string, unknown> = {
               user_id: user.id,
               title: item.title || 'Untitled',
               description: item.description || null,
@@ -248,7 +250,11 @@ export const listingsApi = {
               status: item.status === 'active' ? 'active' : item.status === 'sold' ? 'sold' : 'ended',
               platforms: platformInfo,
               tags: [],
-            });
+            };
+            if (item.createdAt) {
+              row.created_at = item.createdAt;
+            }
+            newListings.push(row);
           }
         }
 
@@ -264,7 +270,7 @@ export const listingsApi = {
           }
         }
 
-        // Update existing listings (status + price)
+        // Update existing listings (status, price, dates, condition)
         for (const item of updatedListings) {
           const updates: Record<string, unknown> = {
             status: item.status,
@@ -273,6 +279,8 @@ export const listingsApi = {
           };
           if (item.price !== undefined) updates.price = item.price;
           if (item.images !== undefined) updates.images = item.images;
+          if (item.createdAt) updates.created_at = item.createdAt;
+          if (item.condition) updates.condition = item.condition;
 
           const { error: updateErr } = await supabase
             .from('listings')

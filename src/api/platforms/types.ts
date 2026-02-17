@@ -26,6 +26,7 @@ export interface PlatformListing {
   images?: string[];
   condition?: string;
   category?: string;
+  createdAt?: string;
 }
 
 export interface SoldItem {

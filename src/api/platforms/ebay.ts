@@ -320,6 +320,7 @@ export const ebayAdapter: PlatformAdapter = {
           price: item.currentPrice || 0,
           images,
           condition: item.conditionDisplayName || '',
+          createdAt: item.startTime || undefined,
           platformData: {
             listingType: item.listingType,
             quantity: item.quantity,
