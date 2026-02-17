@@ -42,8 +42,8 @@ export default function EbayCallbackPage() {
           return;
         }
 
-        // Purge old sales so they get re-synced with correct values
-        await analyticsApi.purgePlatformSales('ebay');
+        // Purge old sales so they get re-synced with correct values (non-blocking)
+        try { await analyticsApi.purgePlatformSales('ebay'); } catch {}
 
         setConnection('ebay', {
           platform: 'ebay',
