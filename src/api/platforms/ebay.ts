@@ -242,11 +242,11 @@ export const ebayAdapter: PlatformAdapter = {
         const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
         const buyer = (order.buyer as Record<string, string>) || {};
 
-        // Get the total sale price
+        // Total = item price + shipping (what the seller receives before fees)
+        // Shipping is revenue to the seller, not a cost — buyer pays it
         const salePrice = Number(pricing.total?.value || 0);
-        const shippingCost = Number(pricing.deliveryCost?.value || 0);
 
-        // Estimate fees from sale price
+        // Estimate fees on total (eBay charges FVF on item + shipping)
         const fees = ebayAdapter.calculateFees(salePrice);
 
         // Get the first line item for title/image
@@ -269,7 +269,7 @@ export const ebayAdapter: PlatformAdapter = {
           imageUrl: itemImage,
           url: itemUrl,
           platform: 'ebay',
-          shippingCost,
+          shippingCost: 0, // Buyer's shipping payment is included in salePrice as revenue
           platformFees: fees.totalFees,
           buyerUsername: buyer.username || undefined,
           orderId: order.orderId as string,
@@ -360,13 +360,14 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   calculateFees(price: number): FeeBreakdown {
-    const finalValueFee = price * 0.1325; // 13.25% standard
-    const paymentProcessingFee = price * 0.0295 + 0.30; // 2.95% + $0.30
-    const totalFees = finalValueFee + paymentProcessingFee;
+    // eBay merged payment processing into FVF — no separate 2.95%
+    const finalValueFee = price * 0.1325; // 13.25% standard FVF (includes payment processing)
+    const perOrderFee = 0.30; // per-order regulatory surcharge
+    const totalFees = finalValueFee + perOrderFee;
 
     return {
       finalValueFee: Math.round(finalValueFee * 100) / 100,
-      paymentProcessingFee: Math.round(paymentProcessingFee * 100) / 100,
+      paymentProcessingFee: Math.round(perOrderFee * 100) / 100,
       totalFees: Math.round(totalFees * 100) / 100,
       netProceeds: Math.round((price - totalFees) * 100) / 100,
     };
