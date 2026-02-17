@@ -15,6 +15,13 @@ export default function ListingsPage() {
     viewMode,
     searchQuery,
     statusFilter,
+    platformFilter,
+    categoryFilter,
+    conditionFilter,
+    sortField,
+    sortDir,
+    currentPage,
+    pageSize,
     isLoading,
     setListings,
     addListing,
@@ -25,8 +32,16 @@ export default function ListingsPage() {
     setViewMode,
     setSearchQuery,
     setStatusFilter,
+    setPlatformFilter,
+    setCategoryFilter,
+    setConditionFilter,
+    setSortField,
+    setSortDir,
+    setCurrentPage,
     setLoading,
-    filteredListings,
+    paginatedListings,
+    totalPages,
+    totalFiltered,
   } = useListingStore();
 
   const location = useLocation();
@@ -47,7 +62,6 @@ export default function ListingsPage() {
     if (!isAuthenticated) return;
     setSyncError('');
 
-    // Sync platform listings first
     setIsSyncing(true);
     try {
       const result = await listingsApi.syncPlatformListings(force);
@@ -61,7 +75,6 @@ export default function ListingsPage() {
       setIsSyncing(false);
     }
 
-    // Then load from Supabase
     setLoading(true);
     try {
       const data = await listingsApi.getAll();
@@ -99,12 +112,39 @@ export default function ListingsPage() {
     }
   };
 
-  const filtered = filteredListings();
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir(field === 'title' ? 'asc' : 'desc');
+    }
+  };
+
+  const paginated = paginatedListings();
+  const pages = totalPages();
+  const total = totalFiltered();
+
+  // Derive unique categories and conditions from listings for filter dropdowns
+  const allListings = useListingStore((s) => s.listings);
+  const categories = [...new Set(allListings.map((l) => l.category).filter(Boolean))] as string[];
+  const conditions = [...new Set(allListings.map((l) => l.condition).filter(Boolean))] as string[];
+  const hasActiveFilters = statusFilter || platformFilter || categoryFilter || conditionFilter || searchQuery;
+
+  const SortIcon = ({ field }: { field: typeof sortField }) => {
+    if (sortField !== field) return <span style={{ opacity: 0.3, marginLeft: 4 }}>&#8597;</span>;
+    return <span style={{ marginLeft: 4, color: 'var(--neon-cyan)' }}>{sortDir === 'asc' ? '&#9650;' : '&#9660;'}</span>;
+  };
 
   return (
     <div>
       <div className="page-header">
-        <h1>Listings</h1>
+        <div>
+          <h1>Listings</h1>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 0 }}>
+            {total} of {allListings.length} listings
+          </span>
+        </div>
         <div className="page-header-actions">
           {isSyncing ? (
             <span style={{ fontSize: 12, color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -145,6 +185,7 @@ export default function ListingsPage() {
         </div>
       )}
 
+      {/* Filters toolbar */}
       <div className="toolbar">
         <div className="toolbar-left">
           <div className="search-input-wrapper">
@@ -164,8 +205,55 @@ export default function ListingsPage() {
             <option value="sold">Sold</option>
             <option value="ended">Ended</option>
           </select>
+          {categories.length > 0 && (
+            <select className="filter-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">All Categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+              ))}
+            </select>
+          )}
+          {conditions.length > 0 && (
+            <select className="filter-select" value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)}>
+              <option value="">All Conditions</option>
+              {conditions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+          <select className="filter-select" value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)}>
+            <option value="">All Platforms</option>
+            <option value="ebay">eBay</option>
+            <option value="depop">Depop</option>
+          </select>
         </div>
         <div className="toolbar-right">
+          {hasActiveFilters && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setSearchQuery(''); setStatusFilter(''); setPlatformFilter(''); setCategoryFilter(''); setConditionFilter(''); }}
+              style={{ fontSize: 12, color: 'var(--neon-red)' }}
+            >
+              Clear Filters
+            </button>
+          )}
+          {/* Sort selector */}
+          <select
+            className="filter-select"
+            value={`${sortField}-${sortDir}`}
+            onChange={(e) => {
+              const [f, d] = e.target.value.split('-');
+              setSortField(f as typeof sortField);
+              setSortDir(d as 'asc' | 'desc');
+            }}
+          >
+            <option value="created_at-desc">Newest First</option>
+            <option value="created_at-asc">Oldest First</option>
+            <option value="price-desc">Price: High to Low</option>
+            <option value="price-asc">Price: Low to High</option>
+            <option value="title-asc">Title: A-Z</option>
+            <option value="title-desc">Title: Z-A</option>
+          </select>
           <div className="view-toggle">
             <button className={viewMode === 'grid' ? 'active' : ''} onClick={() => setViewMode('grid')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -177,10 +265,11 @@ export default function ListingsPage() {
         </div>
       </div>
 
+      {/* Bulk actions */}
       {selectedIds.size > 0 && (
         <div className="bulk-actions">
           <span className="bulk-count">{selectedIds.size} selected</span>
-          <button className="btn btn-sm btn-secondary" onClick={selectAll}>Select All</button>
+          <button className="btn btn-sm btn-secondary" onClick={selectAll}>Select All on Page</button>
           <button className="btn btn-sm btn-secondary" onClick={clearSelection}>Clear</button>
           <button className="btn btn-sm btn-danger" onClick={handleBulkDelete}>Delete Selected</button>
         </div>
@@ -188,23 +277,32 @@ export default function ListingsPage() {
 
       {isLoading ? (
         <div className="loading-spinner"><div className="spinner" /></div>
-      ) : filtered.length === 0 ? (
+      ) : allListings.length === 0 ? (
         <div className="empty-state">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           <h3>No listings yet</h3>
-          <p>Create your first listing to get started with cross-listing</p>
+          <p>Create your first listing or connect eBay in Settings to sync your active listings</p>
           <button className="btn btn-primary" onClick={requireAuth(() => setShowEditor(true), 'Sign in to create listings')}>Create Listing</button>
+        </div>
+      ) : paginated.length === 0 ? (
+        <div className="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <h3>No matches</h3>
+          <p>No listings match your current filters</p>
+          <button className="btn btn-secondary btn-sm" onClick={() => { setSearchQuery(''); setStatusFilter(''); setPlatformFilter(''); setCategoryFilter(''); setConditionFilter(''); }}>
+            Clear All Filters
+          </button>
         </div>
       ) : viewMode === 'grid' ? (
         <div className="listing-grid">
-          {filtered.map((listing) => (
+          {paginated.map((listing) => (
             <div
               key={listing.id}
               className={`listing-card ${selectedIds.has(listing.id) ? 'selected' : ''}`}
               onClick={() => toggleSelect(listing.id)}
             >
               {listing.images[0] ? (
-                <img src={listing.images[0]} alt={listing.title} className="listing-image" />
+                <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
               ) : (
                 <div className="listing-image-placeholder">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -218,8 +316,15 @@ export default function ListingsPage() {
                     <span className="status-dot" />
                     {listing.status}
                   </span>
-                  <span>{formatTimeAgo(listing.created_at)}</span>
+                  {listing.condition && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{listing.condition}</span>
+                  )}
                 </div>
+                {listing.category && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {listing.category.charAt(0).toUpperCase() + listing.category.slice(1)}
+                  </div>
+                )}
                 <div className="listing-platforms">
                   {Object.keys(listing.platforms).map((p) => (
                     <span key={p} className={`platform-badge ${p}`}>{p}</span>
@@ -230,40 +335,117 @@ export default function ListingsPage() {
           ))}
         </div>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th className="checkbox-cell">
-                <input type="checkbox" className="table-checkbox" onChange={() => selectedIds.size === filtered.length ? clearSelection() : selectAll()} checked={selectedIds.size === filtered.length && filtered.length > 0} />
-              </th>
-              <th>Title</th>
-              <th>Price</th>
-              <th>Status</th>
-              <th>Platforms</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((listing) => (
-              <tr key={listing.id}>
-                <td className="checkbox-cell">
-                  <input type="checkbox" className="table-checkbox" checked={selectedIds.has(listing.id)} onChange={() => toggleSelect(listing.id)} />
-                </td>
-                <td>{listing.title}</td>
-                <td>{formatCurrency(listing.price || 0)}</td>
-                <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
-                <td>
-                  <div className="listing-platforms">
-                    {Object.keys(listing.platforms).map((p) => (
-                      <span key={p} className={`platform-badge ${p}`}>{p}</span>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ color: 'var(--text-muted)' }}>{formatTimeAgo(listing.created_at)}</td>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="checkbox-cell">
+                  <input type="checkbox" className="table-checkbox" onChange={() => selectedIds.size === paginated.length ? clearSelection() : selectAll()} checked={selectedIds.size === paginated.length && paginated.length > 0} />
+                </th>
+                <th style={{ width: 50 }}></th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('title')}>
+                  Title <SortIcon field="title" />
+                </th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('price')}>
+                  Price <SortIcon field="price" />
+                </th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('status')}>
+                  Status <SortIcon field="status" />
+                </th>
+                <th>Condition</th>
+                <th>Category</th>
+                <th>Platforms</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('created_at')}>
+                  Created <SortIcon field="created_at" />
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paginated.map((listing) => (
+                <tr key={listing.id}>
+                  <td className="checkbox-cell">
+                    <input type="checkbox" className="table-checkbox" checked={selectedIds.has(listing.id)} onChange={() => toggleSelect(listing.id)} />
+                  </td>
+                  <td style={{ padding: '8px' }}>
+                    {listing.images[0] ? (
+                      <img src={listing.images[0]} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} loading="lazy" />
+                    ) : (
+                      <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ maxWidth: 250 }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</div>
+                  </td>
+                  <td style={{ fontWeight: 600, color: 'var(--neon-green)' }}>{formatCurrency(listing.price || 0)}</td>
+                  <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.condition || '—'}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.category ? listing.category.charAt(0).toUpperCase() + listing.category.slice(1) : '—'}</td>
+                  <td>
+                    <div className="listing-platforms" style={{ marginTop: 0 }}>
+                      {Object.keys(listing.platforms).map((p) => (
+                        <span key={p} className={`platform-badge ${p}`}>{p}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{formatTimeAgo(listing.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pages > 1 && (
+        <div className="pagination">
+          <button
+            className="pagination-btn"
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage(currentPage - 1)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+
+          {Array.from({ length: pages }, (_, i) => i + 1)
+            .filter((p) => {
+              // Show first, last, current, and neighbors
+              if (p === 1 || p === pages) return true;
+              if (Math.abs(p - currentPage) <= 1) return true;
+              return false;
+            })
+            .reduce<(number | 'ellipsis')[]>((acc, p, i, arr) => {
+              if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('ellipsis');
+              acc.push(p);
+              return acc;
+            }, [])
+            .map((item, i) =>
+              item === 'ellipsis' ? (
+                <span key={`e${i}`} className="pagination-ellipsis">...</span>
+              ) : (
+                <button
+                  key={item}
+                  className={`pagination-btn ${currentPage === item ? 'active' : ''}`}
+                  onClick={() => setCurrentPage(item as number)}
+                >
+                  {item}
+                </button>
+              )
+            )}
+
+          <button
+            className="pagination-btn"
+            disabled={currentPage === pages}
+            onClick={() => setCurrentPage(currentPage + 1)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+            {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, total)} of {total}
+          </span>
+        </div>
       )}
 
       {/* New Listing Modal */}
