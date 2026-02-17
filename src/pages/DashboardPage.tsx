@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
@@ -14,76 +14,97 @@ export default function DashboardPage() {
   const { requireAuth } = useRequireAuth();
   const { listings, setListings } = useListingStore();
   const {
-    sales,
-    stats,
     isSyncing,
-    isLoading,
-    setSales,
-    setStats,
-    setLoading: setAnalyticsLoading,
     setSyncing,
     setLastSyncedAt,
   } = useAnalyticsStore();
   const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
-  const location = useLocation();
   const [syncError, setSyncError] = useState('');
-  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const mountedRef = useRef(true);
+
+  // Dashboard-local state for 7-day window
+  const [dashStats, setDashStats] = useState<{ totalRevenue: number; totalProfit: number; totalSales: number; avgProfit: number; avgSalePrice: number } | null>(null);
+  const [recentSales, setRecentSales] = useState<typeof sales>([]);
+
+  // Borrow the sales type
+  const { sales } = useAnalyticsStore();
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    let cancelled = false;
     const syncAndLoad = async () => {
       setSyncError('');
 
-      // Sync platform sales first
-      setSyncing(true);
-      try {
-        const result = await analyticsApi.syncPlatformSales();
-        setLastSyncedAt(new Date().toISOString());
-        if (result.errors.length > 0) {
-          setSyncError(result.errors.join('; '));
+      // Only sync if not already syncing (prevents race conditions on tab switch)
+      const store = useAnalyticsStore.getState();
+      if (!store.isSyncing) {
+        setSyncing(true);
+        try {
+          const result = await analyticsApi.syncPlatformSales();
+          if (!cancelled) {
+            setLastSyncedAt(new Date().toISOString());
+            if (result.errors.length > 0) {
+              setSyncError(result.errors.join('; '));
+            }
+          }
+        } catch (err) {
+          if (!cancelled) {
+            console.error('Dashboard sync error:', err);
+            setSyncError(err instanceof Error ? err.message : 'Sync failed');
+          }
+        } finally {
+          setSyncing(false);
         }
-      } catch (err) {
-        console.error('Dashboard sync error:', err);
-        setSyncError(err instanceof Error ? err.message : 'Sync failed');
-      } finally {
-        setSyncing(false);
+      } else {
+        // Wait for existing sync to finish
+        console.log('[dashboard] Sync already in progress, waiting...');
+        while (useAnalyticsStore.getState().isSyncing) {
+          await new Promise((r) => setTimeout(r, 500));
+          if (cancelled) return;
+        }
       }
 
-      // Check if Finances API fell back to estimated fees
-      setNeedsReconnect(localStorage.getItem('fliptools_ebay_finances_fallback') === 'true');
+      if (cancelled) return;
 
-      // Then load everything from Supabase
-      setAnalyticsLoading(true);
+      // Load 7-day stats for dashboard
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
       try {
-        const [salesStats, salesData, allListings] = await Promise.all([
-          analyticsApi.getStats(),
+        const [statsData, salesData, allListings] = await Promise.all([
+          analyticsApi.getStats(sevenDaysAgo),
           analyticsApi.getSales({ limit: 10 }),
           listingsApi.getAll(),
         ]);
-        setStats(salesStats);
-        setSales(salesData);
-        setListings(allListings);
+        if (!cancelled) {
+          setDashStats(statsData);
+          setRecentSales(salesData);
+          setListings(allListings);
+        }
       } catch (err) {
-        console.error('Dashboard load error:', err);
-      } finally {
-        setAnalyticsLoading(false);
+        if (!cancelled) console.error('Dashboard load error:', err);
       }
     };
 
     syncAndLoad();
-  }, [isAuthenticated, location.key]);
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   const activeListings = listings.filter((l) => l.status === 'active').length;
   const draftListings = listings.filter((l) => l.status === 'draft').length;
-  const recentSales = sales.slice(0, 5);
+  const topSales = recentSales.slice(0, 5);
 
   return (
     <div>
       <div className="page-header">
         <h1>Dashboard</h1>
         <div className="page-header-actions">
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Past 7 days</span>
           <button className="btn btn-primary" onClick={requireAuth(() => navigate('/listings'), 'Sign in to create listings')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             New Listing
@@ -117,13 +138,13 @@ export default function DashboardPage() {
 
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-label">Total Revenue</div>
-          <div className="stat-value">{formatCurrency(stats?.totalRevenue || 0)}</div>
+          <div className="stat-label">Revenue (7D)</div>
+          <div className="stat-value">{formatCurrency(dashStats?.totalRevenue || 0)}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Total Profit</div>
-          <div className={`stat-value ${(stats?.totalProfit || 0) >= 0 ? 'positive' : 'negative'}`}>
-            {formatCurrency(stats?.totalProfit || 0)}
+          <div className="stat-label">Profit (7D)</div>
+          <div className={`stat-value ${(dashStats?.totalProfit || 0) >= 0 ? 'positive' : 'negative'}`}>
+            {formatCurrency(dashStats?.totalProfit || 0)}
           </div>
         </div>
         <div className="stat-card">
@@ -131,8 +152,8 @@ export default function DashboardPage() {
           <div className="stat-value">{activeListings}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Items Sold</div>
-          <div className="stat-value">{stats?.totalSales || 0}</div>
+          <div className="stat-label">Items Sold (7D)</div>
+          <div className="stat-value">{dashStats?.totalSales || 0}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Inventory Value</div>
@@ -168,24 +189,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {needsReconnect && (
-        <div style={{
-          padding: '10px 16px',
-          marginBottom: 16,
-          borderRadius: 8,
-          background: 'rgba(255,165,0,0.1)',
-          border: '1px solid rgba(255,165,0,0.4)',
-          color: '#ffa500',
-          fontSize: 13,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span>Profit numbers are estimated. Disconnect &amp; re-connect eBay in <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Settings</Link> for accurate earnings.</span>
-        </div>
-      )}
-
       {/* Recent Sales */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
@@ -206,9 +209,9 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
-        {isLoading || isSyncing ? (
+        {isSyncing && topSales.length === 0 ? (
           <div className="loading-spinner" style={{ padding: 32 }}><div className="spinner" /></div>
-        ) : recentSales.length === 0 ? (
+        ) : topSales.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
             {isAuthenticated ? 'No sales yet. Connect eBay in Settings to sync your sales.' : 'Sign in to view your sales.'}
           </div>
@@ -224,7 +227,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {recentSales.map((sale) => (
+              {topSales.map((sale) => (
                 <tr key={sale.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

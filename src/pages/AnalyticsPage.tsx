@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
 import { analyticsApi } from '../api/analytics';
@@ -35,35 +34,44 @@ export default function AnalyticsPage() {
     getDateRangeStart,
   } = useAnalyticsStore();
 
-  const location = useLocation();
   const { isFree } = useSubscription();
   const { allowed: advancedAllowed } = useFeatureGate('advanced-analytics');
-  const [syncError, setSyncError] = useState('');
-  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const cancelledRef = useRef(false);
 
-  const syncAndLoad = async () => {
+  const syncAndLoad = async (forceSync = false) => {
     if (!isAuthenticated) return;
-    setSyncError('');
 
-    // Sync platform sales first
-    setSyncing(true);
-    try {
-      const result = await analyticsApi.syncPlatformSales(getDateRangeStart());
-      setLastSyncedAt(new Date().toISOString());
-      if (result.errors.length > 0) {
-        setSyncError(result.errors.join('; '));
+    const store = useAnalyticsStore.getState();
+
+    // Sync platform sales (skip if already syncing, unless forced)
+    if (forceSync || !store.isSyncing) {
+      if (!forceSync && store.isSyncing) {
+        // Wait for existing sync
+        while (useAnalyticsStore.getState().isSyncing) {
+          await new Promise((r) => setTimeout(r, 500));
+          if (cancelledRef.current) return;
+        }
+      } else {
+        setSyncing(true);
+        try {
+          const result = await analyticsApi.syncPlatformSales(getDateRangeStart());
+          if (!cancelledRef.current) {
+            setLastSyncedAt(new Date().toISOString());
+          }
+          if (result.errors.length > 0) {
+            console.warn('Sync issues:', result.errors);
+          }
+        } catch (err) {
+          console.error('Sync error:', err);
+        } finally {
+          setSyncing(false);
+        }
       }
-    } catch (err) {
-      console.error('Sync error:', err);
-      setSyncError(err instanceof Error ? err.message : 'Sync failed');
-    } finally {
-      setSyncing(false);
     }
 
-    // Check if Finances API fell back to estimated fees
-    setNeedsReconnect(localStorage.getItem('fliptools_ebay_finances_fallback') === 'true');
+    if (cancelledRef.current) return;
 
-    // Then load from Supabase
+    // Load from Supabase
     setLoading(true);
     try {
       const startDate = getDateRangeStart();
@@ -71,18 +79,22 @@ export default function AnalyticsPage() {
         analyticsApi.getSales({ startDate, platform: platformFilter || undefined, limit: 200 }),
         analyticsApi.getStats(startDate),
       ]);
-      setSales(salesData);
-      setStats(statsData);
+      if (!cancelledRef.current) {
+        setSales(salesData);
+        setStats(statsData);
+      }
     } catch (err) {
       console.error('Analytics load error:', err);
     } finally {
-      setLoading(false);
+      if (!cancelledRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    cancelledRef.current = false;
     syncAndLoad();
-  }, [dateRange, platformFilter, isAuthenticated, location.key]);
+    return () => { cancelledRef.current = true; };
+  }, [dateRange, platformFilter, isAuthenticated]);
 
   // Get unique platforms from sales data for filter
   const platforms = [...new Set(sales.map((s) => s.platform))];
@@ -105,7 +117,7 @@ export default function AnalyticsPage() {
           )}
           <button
             className="btn btn-ghost btn-sm"
-            onClick={syncAndLoad}
+            onClick={() => syncAndLoad(true)}
             disabled={isSyncing || isLoading}
             title="Sync sales from connected platforms"
           >
@@ -133,38 +145,6 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
-
-      {syncError && (
-        <div style={{
-          padding: '10px 16px',
-          marginBottom: 16,
-          borderRadius: 8,
-          background: 'rgba(255,59,48,0.1)',
-          border: '1px solid var(--neon-red)',
-          color: 'var(--neon-red)',
-          fontSize: 13,
-        }}>
-          Sync issue: {syncError}
-        </div>
-      )}
-
-      {needsReconnect && (
-        <div style={{
-          padding: '10px 16px',
-          marginBottom: 16,
-          borderRadius: 8,
-          background: 'rgba(255,165,0,0.1)',
-          border: '1px solid rgba(255,165,0,0.4)',
-          color: '#ffa500',
-          fontSize: 13,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span>Profit numbers are estimated. Disconnect &amp; re-connect eBay in <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Settings</Link> for accurate earnings.</span>
-        </div>
-      )}
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -209,7 +189,7 @@ export default function AnalyticsPage() {
       {/* Recent Sales Table */}
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Recent Sales</div>
+          <div className="card-title">Sales</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {platforms.length > 0 && (
               <div style={{ display: 'flex', gap: 4 }}>
@@ -236,7 +216,7 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {isLoading || isSyncing ? (
+        {isSyncing && filteredSales.length === 0 ? (
           <div className="loading-spinner" style={{ padding: 40 }}><div className="spinner" /></div>
         ) : filteredSales.length === 0 ? (
           <div className="empty-state" style={{ padding: 40 }}>

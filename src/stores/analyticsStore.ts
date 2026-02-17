@@ -11,6 +11,7 @@ interface AnalyticsState {
   isLoading: boolean;
   isSyncing: boolean;
   lastSyncedAt: string | null;
+  _syncPromise: Promise<unknown> | null;
 
   setSales: (sales: Sale[]) => void;
   setStats: (stats: SalesStats) => void;
@@ -26,11 +27,12 @@ interface AnalyticsState {
 export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
   sales: [],
   stats: null,
-  dateRange: '30d',
+  dateRange: 'all',
   platformFilter: '',
   isLoading: false,
   isSyncing: false,
   lastSyncedAt: null,
+  _syncPromise: null,
 
   setSales: (sales) => set({ sales }),
   setStats: (stats) => set({ stats }),
