@@ -99,34 +99,55 @@ async function handleTradingApi(
       });
     }
 
+    // Check eBay-level Ack (eBay returns HTTP 200 even on API errors)
+    const ackMatch = xmlText.match(/<Ack>(\w+)<\/Ack>/);
+    const ack = ackMatch ? ackMatch[1] : 'Unknown';
+
+    if (ack === 'Failure') {
+      // Extract error message from XML
+      const errMsgMatch = xmlText.match(/<ShortMessage>([^<]+)<\/ShortMessage>/);
+      const errLongMatch = xmlText.match(/<LongMessage>([^<]+)<\/LongMessage>/);
+      const errMsg = errLongMatch?.[1] || errMsgMatch?.[1] || 'Unknown error';
+      console.error(`Trading API ${callName} Ack=Failure:`, errMsg);
+      return res.status(400).json({
+        error: `eBay: ${errMsg}`,
+        ack,
+      });
+    }
+
     // Parse the XML response into JSON for the client
     if (callName === 'GetMyeBaySelling') {
-      const items = parseGetMyeBaySelling(xmlText);
-      return res.status(200).json({ items, totalItems: items.length });
+      const parsed = parseGetMyeBaySelling(xmlText);
+      console.log(`Trading API ${callName}: Ack=${ack}, items=${parsed.items.length}, total=${parsed.totalEntries}`);
+      return res.status(200).json(parsed);
     }
 
     // Default: return raw XML as text
-    return res.status(200).json({ xml: xmlText });
+    return res.status(200).json({ xml: xmlText, ack });
   } catch (err) {
     console.error(`Trading API ${callName} error:`, err);
     return res.status(500).json({ error: 'Trading API request failed' });
   }
 }
 
-// Parse GetMyeBaySelling XML response into a clean JSON array
-function parseGetMyeBaySelling(xml: string): Array<{
-  itemId: string;
-  title: string;
-  currentPrice: number;
-  imageUrl: string;
-  viewItemUrl: string;
-  listingType: string;
-  quantity: number;
-  quantityAvailable: number;
-  status: string;
-  startTime: string;
-  conditionDisplayName: string;
-}> {
+// Parse GetMyeBaySelling XML response into JSON
+function parseGetMyeBaySelling(xml: string): {
+  items: Array<{
+    itemId: string;
+    title: string;
+    currentPrice: number;
+    imageUrl: string;
+    viewItemUrl: string;
+    listingType: string;
+    quantity: number;
+    quantityAvailable: number;
+    status: string;
+    startTime: string;
+    conditionDisplayName: string;
+  }>;
+  totalEntries: number;
+  totalPages: number;
+} {
   const items: Array<{
     itemId: string;
     title: string;
@@ -141,13 +162,25 @@ function parseGetMyeBaySelling(xml: string): Array<{
     conditionDisplayName: string;
   }> = [];
 
-  // Extract all <Item> blocks from the ActiveList
-  const activeListMatch = xml.match(/<ActiveList>([\s\S]*?)<\/ActiveList>/);
-  if (!activeListMatch) return items;
+  // Extract ActiveList section
+  const activeListMatch = xml.match(/<ActiveList>([\s\S]*)<\/ActiveList>/);
+  if (!activeListMatch) {
+    return { items, totalEntries: 0, totalPages: 0 };
+  }
 
   const activeListXml = activeListMatch[1];
+
+  // Get pagination info
+  const totalEntriesMatch = activeListXml.match(/<TotalNumberOfEntries>(\d+)<\/TotalNumberOfEntries>/);
+  const totalPagesMatch = activeListXml.match(/<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/);
+  const totalEntries = totalEntriesMatch ? Number(totalEntriesMatch[1]) : 0;
+  const totalPages = totalPagesMatch ? Number(totalPagesMatch[1]) : 0;
+
+  // Extract Item blocks (they're inside <ItemArray><Item>...</Item></ItemArray>)
   const itemMatches = activeListXml.match(/<Item>([\s\S]*?)<\/Item>/g);
-  if (!itemMatches) return items;
+  if (!itemMatches) {
+    return { items, totalEntries, totalPages };
+  }
 
   for (const itemXml of itemMatches) {
     const get = (tag: string) => {
@@ -173,7 +206,7 @@ function parseGetMyeBaySelling(xml: string): Array<{
     });
   }
 
-  return items;
+  return { items, totalEntries, totalPages };
 }
 
 function decodeXmlEntities(str: string): string {

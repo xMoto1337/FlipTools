@@ -189,24 +189,22 @@ export const ebayAdapter: PlatformAdapter = {
     // This works for listings created through the eBay website, app, or any API
     const allListings: PlatformListing[] = [];
     let pageNumber = 1;
+    let totalPages = 1;
 
-    while (true) {
-      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <ActiveList>
-    <Include>true</Include>
-    <Pagination>
-      <EntriesPerPage>200</EntriesPerPage>
-      <PageNumber>${pageNumber}</PageNumber>
-    </Pagination>
-  </ActiveList>
-  <DetailLevel>ReturnAll</DetailLevel>
-  <OutputSelector>
-    ItemID,Title,PictureDetails,SellingStatus,ListingType,
-    Quantity,QuantityAvailable,ViewItemURL,StartTime,
-    ConditionDisplayName,ListingDetails
-  </OutputSelector>
-</GetMyeBaySellingRequest>`;
+    while (pageNumber <= totalPages) {
+      const xmlBody = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">',
+        '  <ActiveList>',
+        '    <Include>true</Include>',
+        '    <Pagination>',
+        `      <EntriesPerPage>200</EntriesPerPage>`,
+        `      <PageNumber>${pageNumber}</PageNumber>`,
+        '    </Pagination>',
+        '  </ActiveList>',
+        '  <DetailLevel>ReturnAll</DetailLevel>',
+        '</GetMyeBaySellingRequest>',
+      ].join('\n');
 
       const resp = await fetch('/api/ebay-proxy', {
         method: 'POST',
@@ -222,11 +220,16 @@ export const ebayAdapter: PlatformAdapter = {
 
       if (!resp.ok) {
         console.error('[ebay] GetMyeBaySelling error:', resp.status, data);
-        if (resp.status === 401) throw new Error('eBay token expired');
-        break;
+        if (data.error) throw new Error(data.error);
+        throw new Error('eBay token expired');
       }
 
+      // Update pagination from response
+      if (data.totalPages) totalPages = data.totalPages;
+
       const items = data.items || [];
+      console.log(`[ebay] GetMyeBaySelling page ${pageNumber}/${totalPages}: ${items.length} items (total: ${data.totalEntries})`);
+
       if (items.length === 0) break;
 
       for (const item of items) {
@@ -246,10 +249,6 @@ export const ebayAdapter: PlatformAdapter = {
         });
       }
 
-      console.log(`[ebay] GetMyeBaySelling page ${pageNumber}: ${items.length} items`);
-
-      // Check if there are more pages
-      if (items.length < 200) break;
       pageNumber++;
     }
 
