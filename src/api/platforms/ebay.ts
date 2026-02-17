@@ -317,21 +317,13 @@ export const ebayAdapter: PlatformAdapter = {
         console.log(`[ebay] Order ${order.orderId} raw pricing:`, JSON.stringify(pricing));
         console.log(`[ebay] Order ${order.orderId} raw paymentSummary:`, JSON.stringify(paymentSummary));
 
-        // Gross sale = item subtotal + delivery (what buyer paid minus tax)
-        const priceSubtotal = pricing.priceSubtotal as Record<string, string> | undefined;
-        const subtotal = Number(priceSubtotal?.value || 0);
-
-        // deliveryCost can be nested: { shippingCost: { value, currency } } or flat { value, currency }
-        const deliveryCostObj = (pricing.deliveryCost || {}) as Record<string, unknown>;
-        const delivery = Number(
-          (deliveryCostObj?.shippingCost as Record<string, string>)?.value
-          || (deliveryCostObj as Record<string, string>)?.value
-          || 0
-        );
-        const grossSale = subtotal + delivery;
-
-        // Also grab pricingSummary.total as a cross-check
+        // Use pricingSummary.total as the gross (accounts for delivery discounts)
+        const subtotal = Number((pricing.priceSubtotal as Record<string, string>)?.value || 0);
         const pricingTotal = Number((pricing.total as Record<string, string>)?.value || 0);
+        // Net delivery = total - subtotal (includes any delivery discounts)
+        const netDelivery = Math.max(0, pricingTotal - subtotal);
+        // Use pricingTotal as gross; fall back to subtotal if total is missing
+        const grossSale = pricingTotal > 0 ? pricingTotal : subtotal;
 
         // Try to get actual payout from paymentSummary
         const payments = (paymentSummary.payments as Array<Record<string, unknown>>) || [];
@@ -340,13 +332,10 @@ export const ebayAdapter: PlatformAdapter = {
         let actualPayout = 0;
         let hasPayoutData = false;
 
-        // Method 1: totalDueSeller (what eBay owes the seller)
         if (totalDueSeller?.value) {
           actualPayout = Number(totalDueSeller.value);
           hasPayoutData = true;
-        }
-        // Method 2: sum of payment amounts
-        else if (payments.length > 0) {
+        } else if (payments.length > 0) {
           for (const payment of payments) {
             const paymentAmount = (payment.amount as Record<string, string>)?.value;
             if (paymentAmount) {
@@ -356,26 +345,27 @@ export const ebayAdapter: PlatformAdapter = {
           }
         }
 
-        console.log(`[ebay] Order ${order.orderId}: subtotal=$${subtotal}, delivery=$${delivery}, gross=$${grossSale}, pricingTotal=$${pricingTotal}, payout=$${actualPayout}, hasPayoutData=${hasPayoutData}`);
-
         let salePrice: number;
         let platformFees: number;
         let shippingCost: number;
 
         if (hasPayoutData && actualPayout > 0) {
-          // We have actual payout data — compute all deductions
-          const allDeductions = grossSale - actualPayout;
+          // payout = gross - eBay fees (but does NOT subtract shipping label cost)
+          // So: eBay fees = gross - payout, shipping = delivery (buyer-paid, best proxy for label)
+          // profit = gross - shipping - fees = payout - shipping ≈ what seller actually nets
           salePrice = grossSale;
-          platformFees = Math.max(0, Math.round(allDeductions * 100) / 100);
-          shippingCost = 0; // included in allDeductions
-          console.log(`[ebay] Order ${order.orderId}: PAYOUT MODE — fees=$${platformFees}, profit will be $${(grossSale - platformFees).toFixed(2)}`);
+          platformFees = Math.max(0, Math.round((grossSale - actualPayout) * 100) / 100);
+          shippingCost = Math.round(netDelivery * 100) / 100;
+          const profit = grossSale - platformFees - shippingCost;
+          console.log(`[ebay] Order ${order.orderId}: gross=$${grossSale}, payout=$${actualPayout}, fees=$${platformFees}, shipping=$${shippingCost}, profit=$${profit.toFixed(2)}`);
         } else {
-          // No payout data — use estimated fees
-          const fees = ebayAdapter.calculateFees(grossSale);
+          // No payout data — estimate fees, use delivery as shipping
+          const fees = ebayAdapter.calculateFees(subtotal);
           salePrice = grossSale;
           platformFees = fees.totalFees;
-          shippingCost = 0;
-          console.log(`[ebay] Order ${order.orderId}: ESTIMATED MODE — fees=$${platformFees}, profit will be $${(grossSale - platformFees).toFixed(2)}`);
+          shippingCost = Math.round(netDelivery * 100) / 100;
+          const profit = grossSale - platformFees - shippingCost;
+          console.log(`[ebay] Order ${order.orderId}: ESTIMATED — gross=$${grossSale}, fees=$${platformFees}, shipping=$${shippingCost}, profit=$${profit.toFixed(2)}`);
         }
 
         allOrders.push({
