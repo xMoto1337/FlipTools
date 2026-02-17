@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePlatformStore } from '../stores/platformStore';
-import { analyticsApi } from '../api/analytics';
 
 export default function EbayCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -13,6 +12,8 @@ export default function EbayCallbackPage() {
   useEffect(() => {
     const code = searchParams.get('code');
     const error = searchParams.get('error');
+
+    console.log('[ebay-callback] code:', code ? 'present' : 'missing', 'error:', error);
 
     if (error) {
       setStatus('error');
@@ -28,22 +29,29 @@ export default function EbayCallbackPage() {
 
     (async () => {
       try {
+        console.log('[ebay-callback] Exchanging code for tokens...');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+
         const response = await fetch('/api/ebay-auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, grant_type: 'authorization_code' }),
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
 
+        console.log('[ebay-callback] Response status:', response.status);
         const data = await response.json();
 
         if (!response.ok) {
+          console.error('[ebay-callback] Token exchange failed:', data);
           setStatus('error');
           setErrorMsg(data.error || 'Failed to connect eBay account');
           return;
         }
 
-        // Purge old sales so they get re-synced with correct values (non-blocking)
-        try { await analyticsApi.purgePlatformSales('ebay'); } catch {}
+        console.log('[ebay-callback] Token exchange success, saving connection...');
 
         setConnection('ebay', {
           platform: 'ebay',
@@ -54,14 +62,24 @@ export default function EbayCallbackPage() {
           connectedAt: new Date().toISOString(),
         });
         setStatus('success');
+
+        // Purge old sales in the background (don't block or await)
+        import('../api/analytics').then(({ analyticsApi }) => {
+          analyticsApi.purgePlatformSales('ebay').catch(() => {});
+        }).catch(() => {});
+
         if (window.opener) {
           setTimeout(() => window.close(), 1500);
         } else {
           setTimeout(() => navigate('/settings'), 2000);
         }
       } catch (err) {
+        console.error('[ebay-callback] Error:', err);
+        const msg = err instanceof DOMException && err.name === 'AbortError'
+          ? 'Request timed out — please try again'
+          : (err as Error).message || 'Failed to connect eBay account';
         setStatus('error');
-        setErrorMsg((err as Error).message || 'Failed to connect eBay account');
+        setErrorMsg(msg);
       }
     })();
   }, [searchParams, navigate, setConnection]);
