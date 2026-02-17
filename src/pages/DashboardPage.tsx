@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [syncError, setSyncError] = useState('');
+  const [needsReconnect, setNeedsReconnect] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -49,6 +50,9 @@ export default function DashboardPage() {
       } finally {
         setSyncing(false);
       }
+
+      // Check if Finances API fell back to estimated fees
+      setNeedsReconnect(localStorage.getItem('fliptools_ebay_finances_fallback') === 'true');
 
       // Then load everything from Supabase
       setAnalyticsLoading(true);
@@ -161,6 +165,24 @@ export default function DashboardPage() {
           >
             Settings
           </button>
+        </div>
+      )}
+
+      {needsReconnect && (
+        <div style={{
+          padding: '10px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          background: 'rgba(255,165,0,0.1)',
+          border: '1px solid rgba(255,165,0,0.4)',
+          color: '#ffa500',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>Profit numbers are estimated. Disconnect &amp; re-connect eBay in <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Settings</Link> for accurate earnings.</span>
         </div>
       )}
 

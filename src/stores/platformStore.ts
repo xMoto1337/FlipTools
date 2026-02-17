@@ -28,17 +28,28 @@ export const usePlatformStore = create<PlatformState>()(
       connections: {},
       syncStatus: {},
 
-      setConnection: (platform, connection) =>
+      setConnection: (platform, connection) => {
+        // Clear sync caches so data re-syncs with new token/scopes
+        try {
+          localStorage.removeItem('fliptools_listings_last_sync');
+          localStorage.removeItem('fliptools_ebay_finances_fallback');
+        } catch {}
         set((s) => ({
           connections: { ...s.connections, [platform]: connection },
-        })),
+        }));
+      },
 
-      removeConnection: (platform) =>
+      removeConnection: (platform) => {
+        try {
+          localStorage.removeItem('fliptools_listings_last_sync');
+          localStorage.removeItem('fliptools_ebay_finances_fallback');
+        } catch {}
         set((s) => {
           const connections = { ...s.connections };
           delete connections[platform];
           return { connections };
-        }),
+        });
+      },
 
       setSyncStatus: (platform, status) =>
         set((s) => ({

@@ -411,6 +411,8 @@ export const ebayAdapter: PlatformAdapter = {
 
       if (!txResponse.ok) {
         console.warn('[ebay] Finances API error:', txResponse.status, txData);
+        // Signal to UI that we're using estimated fees (user needs to re-connect eBay)
+        try { localStorage.setItem('fliptools_ebay_finances_fallback', 'true'); } catch {}
         // If Finances API fails (e.g. scope not authorized yet), fall back to Fulfillment-only
         if (orderMap.size > 0) {
           console.log('[ebay] Falling back to Fulfillment API with estimated fees');
@@ -471,6 +473,9 @@ export const ebayAdapter: PlatformAdapter = {
       if (transactions.length < 200) break;
       txOffset += transactions.length;
     }
+
+    // Finances API worked — clear the fallback flag
+    try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
 
     console.log(`[ebay] getSales: ${allOrders.length} sales from Finances API (${orderMap.size} orders from Fulfillment)`);
     return allOrders;
