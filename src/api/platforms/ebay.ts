@@ -424,12 +424,15 @@ export const ebayAdapter: PlatformAdapter = {
       // Log first transaction for debugging
       if (allOrders.length === 0 && transactions.length > 0) {
         const sample = transactions[0];
+        const sampleNet = Number((sample.amount as Record<string, string>)?.value || 0);
+        const sampleFees = Math.abs(Number((sample.totalFeeAmount as Record<string, string>)?.value || 0));
+        const sampleGross = Number((sample.totalFeeBasisAmount as Record<string, string>)?.value || 0);
         console.log('[ebay] Sample Finances transaction:', {
           orderId: sample.orderId,
-          totalFeeBasis: sample.totalFeeBasisAmount,
-          totalFee: sample.totalFeeAmount,
-          netAmount: sample.amount,
-          transactionDate: sample.transactionDate,
+          gross: sampleGross,
+          fees: sampleFees,
+          netPayout: sampleNet,
+          check: `gross(${sampleGross}) - fees(${sampleFees}) = ${(sampleGross - sampleFees).toFixed(2)} vs net(${sampleNet})`,
         });
       }
 
@@ -437,26 +440,28 @@ export const ebayAdapter: PlatformAdapter = {
         const orderId = tx.orderId as string;
         if (!orderId) continue;
 
-        // totalFeeBasisAmount = gross sale (what buyer paid minus tax)
-        // totalFeeAmount = actual eBay fees (negative number)
-        // amount = net payout to seller (what you actually get)
-        const grossAmount = Number((tx.totalFeeBasisAmount as Record<string, string>)?.value || 0);
-        const totalFees = Math.abs(Number((tx.totalFeeAmount as Record<string, string>)?.value || 0));
-        // tx.amount is the net payout — we derive it from gross - fees instead
+        // amount = the NET payout to seller (after eBay deducts all fees, shipping labels, etc.)
+        // This is the actual money that hits the seller's bank account.
+        // totalFeeBasisAmount = gross basis for fee calculation (NOT reliable as "sale price")
+        // totalFeeAmount = fees eBay charged (negative)
+        const netPayout = Number((tx.amount as Record<string, string>)?.value || 0);
 
         // Get order details from fulfillment data
         const orderInfo = orderMap.get(orderId);
 
+        // Use net payout as sale_price with fees=0 so profit = net_payout - cost
+        // This gives the most accurate "what you actually earned" number
+        // The gross and fees are stored for display purposes
         allOrders.push({
           title: orderInfo?.title || 'eBay Sale',
-          price: grossAmount,
+          price: netPayout,
           soldDate: (tx.transactionDate as string) || orderInfo?.creationDate || '',
           condition: '',
           imageUrl: orderInfo?.imageUrl || '',
           url: '',
           platform: 'ebay',
           shippingCost: 0,
-          platformFees: totalFees,
+          platformFees: 0,
           buyerUsername: orderInfo?.buyerUsername || undefined,
           orderId,
         });
