@@ -305,12 +305,34 @@ export const ebayAdapter: PlatformAdapter = {
         const pricing = (order.pricingSummary as Record<string, Record<string, string>>) || {};
         const buyer = (order.buyer as Record<string, string>) || {};
 
-        // Total = item price + shipping (what the seller receives before fees)
-        // Shipping is revenue to the seller, not a cost — buyer pays it
-        const salePrice = Number(pricing.total?.value || 0);
+        // Use priceSubtotal + deliveryCost (NOT total, which may include sales tax
+        // that eBay collects and the seller never receives)
+        const subtotal = Number(pricing.priceSubtotal?.value || 0);
+        const delivery = Number(pricing.deliveryCost?.value || 0);
+        const salePrice = subtotal + delivery;
 
-        // Estimate fees on total (eBay charges FVF on item + shipping)
-        const fees = ebayAdapter.calculateFees(salePrice);
+        // Use eBay's actual marketplace fee if available, otherwise estimate
+        const totalMarketplaceFee = order.totalMarketplaceFee as Record<string, string> | undefined;
+        let platformFees: number;
+        if (totalMarketplaceFee?.value) {
+          platformFees = Math.abs(Number(totalMarketplaceFee.value));
+        } else {
+          // Fallback to estimated fees
+          const fees = ebayAdapter.calculateFees(salePrice);
+          platformFees = fees.totalFees;
+        }
+
+        // Log first order for debugging
+        if (allOrders.length === 0) {
+          console.log('[ebay] Sample order pricing:', {
+            total: pricing.total?.value,
+            subtotal: pricing.priceSubtotal?.value,
+            delivery: pricing.deliveryCost?.value,
+            tax: pricing.tax?.value,
+            actualFee: totalMarketplaceFee?.value,
+            computed: { salePrice, platformFees },
+          });
+        }
 
         // Get the first line item for title/image
         const firstItem = lineItems[0] || {};
@@ -332,8 +354,8 @@ export const ebayAdapter: PlatformAdapter = {
           imageUrl: itemImage,
           url: itemUrl,
           platform: 'ebay',
-          shippingCost: 0, // Buyer's shipping payment is included in salePrice as revenue
-          platformFees: fees.totalFees,
+          shippingCost: 0,
+          platformFees,
           buyerUsername: buyer.username || undefined,
           orderId: order.orderId as string,
         });
