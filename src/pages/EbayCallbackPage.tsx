@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePlatformStore } from '../stores/platformStore';
+import { analyticsApi } from '../api/analytics';
 
 export default function EbayCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -40,6 +41,9 @@ export default function EbayCallbackPage() {
           setErrorMsg(data.error || 'Failed to connect eBay account');
           return;
         }
+
+        // Purge old sales so they get re-synced with correct values
+        await analyticsApi.purgePlatformSales('ebay');
 
         setConnection('ebay', {
           platform: 'ebay',

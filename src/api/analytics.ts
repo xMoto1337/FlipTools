@@ -152,6 +152,27 @@ export const analyticsApi = {
   },
 
   /**
+   * Delete all sales for a platform so they can be re-synced fresh.
+   * Called when reconnecting a platform to clear stale cached data.
+   */
+  async purgePlatformSales(platform: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from('sales')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('platform', platform);
+
+    if (error) {
+      console.error(`[sync] Failed to purge ${platform} sales:`, error);
+    } else {
+      console.log(`[sync] Purged all ${platform} sales for fresh re-sync`);
+    }
+  },
+
+  /**
    * Sync sales from all connected platforms into Supabase.
    * Fetches orders from each platform API and upserts them.
    */
