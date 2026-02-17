@@ -389,105 +389,109 @@ export const ebayAdapter: PlatformAdapter = {
       offset += orders.length;
     }
 
-    // Step 2: Fetch transactions from Finances API for accurate fees
-    // The Finances API has actual fee amounts, not estimates
-    const allOrders: SoldItem[] = [];
-    let txOffset = 0;
+    // Step 2: Fetch ALL transaction types from Finances API
+    // SALE = order revenue + marketplace fees
+    // SHIPPING_LABEL = shipping label costs (deducted from payout)
+    // We need both to compute accurate profit
+    const saleTxMap = new Map<string, { gross: number; fees: number; date: string }>();
+    const shippingCostMap = new Map<string, number>();
+    let financesWorked = false;
 
-    while (true) {
-      const txParams = new URLSearchParams({
-        limit: '200',
-        offset: String(txOffset),
-        filter: 'transactionType:{SALE}',
-      });
+    for (const txType of ['SALE', 'SHIPPING_LABEL']) {
+      let txOffset = 0;
 
-      // Add date filter for Finances API
-      if (params.startDate) {
-        txParams.set('filter', `transactionType:{SALE},transactionDate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`);
-      }
+      while (true) {
+        const dateFilter = params.startDate
+          ? `,transactionDate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`
+          : '';
+        const txParams = new URLSearchParams({
+          limit: '200',
+          offset: String(txOffset),
+          filter: `transactionType:{${txType}}${dateFilter}`,
+        });
 
-      const txResponse = await ebayGet(`/sell/finances/v1/transaction?${txParams}`, token);
-      const txData = await txResponse.json();
+        const txResponse = await ebayGet(`/sell/finances/v1/transaction?${txParams}`, token);
+        const txData = await txResponse.json();
 
-      if (!txResponse.ok) {
-        console.warn('[ebay] Finances API error:', txResponse.status, txData);
-        // Signal to UI that we're using estimated fees (user needs to re-connect eBay)
-        try { localStorage.setItem('fliptools_ebay_finances_fallback', 'true'); } catch {}
-        // If Finances API fails (e.g. scope not authorized yet), fall back to Fulfillment-only
-        if (orderMap.size > 0) {
-          console.log('[ebay] Falling back to Fulfillment API with estimated fees');
-          return getSalesFromFulfillmentOnly(params, token);
+        if (!txResponse.ok) {
+          console.warn(`[ebay] Finances API error (${txType}):`, txResponse.status, txData);
+          if (txType === 'SALE') {
+            // Finances API not authorized — fall back
+            try { localStorage.setItem('fliptools_ebay_finances_fallback', 'true'); } catch {}
+            if (orderMap.size > 0) {
+              console.log('[ebay] Falling back to Fulfillment API with estimated fees');
+              return getSalesFromFulfillmentOnly(params, token);
+            }
+            return [];
+          }
+          break; // SHIPPING_LABEL failed — just skip it, fees alone are still useful
         }
-        break;
+
+        const transactions = txData.transactions || [];
+        if (transactions.length === 0) break;
+
+        if (txType === 'SALE' && txOffset === 0) {
+          financesWorked = true;
+          // Log first SALE transaction for debugging
+          const sample = transactions[0];
+          console.log('[ebay] Sample SALE transaction:', JSON.stringify(sample, null, 2));
+        }
+
+        for (const tx of transactions) {
+          const orderId = tx.orderId as string;
+          if (!orderId) continue;
+
+          if (txType === 'SALE') {
+            const gross = Number((tx.totalFeeBasisAmount as Record<string, string>)?.value || 0)
+              || Number((tx.amount as Record<string, string>)?.value || 0);
+            const fees = Math.abs(Number((tx.totalFeeAmount as Record<string, string>)?.value || 0));
+            const date = (tx.transactionDate as string) || '';
+            saleTxMap.set(orderId, { gross, fees, date });
+          } else {
+            // SHIPPING_LABEL: amount is negative (cost to seller)
+            const labelCost = Math.abs(Number((tx.amount as Record<string, string>)?.value || 0));
+            const existing = shippingCostMap.get(orderId) || 0;
+            shippingCostMap.set(orderId, existing + labelCost);
+          }
+        }
+
+        if (transactions.length < 200) break;
+        txOffset += transactions.length;
       }
-
-      const transactions = txData.transactions || [];
-      if (transactions.length === 0) break;
-
-      // Log first transaction for debugging
-      if (allOrders.length === 0 && transactions.length > 0) {
-        const sample = transactions[0];
-        const sampleNet = Number((sample.amount as Record<string, string>)?.value || 0);
-        const sampleFees = Math.abs(Number((sample.totalFeeAmount as Record<string, string>)?.value || 0));
-        const sampleGross = Number((sample.totalFeeBasisAmount as Record<string, string>)?.value || 0);
-        console.log('[ebay] Sample Finances transaction:', JSON.stringify(sample, null, 2));
-        console.log('[ebay] Parsed values:', {
-          orderId: sample.orderId,
-          gross: sampleGross,
-          fees: sampleFees,
-          netPayout: sampleNet,
-          allDeductions: sampleGross - sampleNet,
-          check: `gross(${sampleGross}) - fees(${sampleFees}) = ${(sampleGross - sampleFees).toFixed(2)} vs net(${sampleNet})`,
-        });
-      }
-
-      for (const tx of transactions) {
-        const orderId = tx.orderId as string;
-        if (!orderId) continue;
-
-        // Finances API fields:
-        // - totalFeeBasisAmount = gross sale (item + shipping, what buyer paid excl. tax)
-        // - totalFeeAmount = eBay fees (negative number)
-        // - amount = net payout (after ALL deductions: fees, shipping labels, promotions)
-        const grossAmount = Number((tx.totalFeeBasisAmount as Record<string, string>)?.value || 0);
-        const netAmount = Number((tx.amount as Record<string, string>)?.value || 0);
-        const feeAmount = Math.abs(Number((tx.totalFeeAmount as Record<string, string>)?.value || 0));
-
-        // Calculate ALL deductions (fees + shipping labels + promotions + everything eBay took)
-        // allDeductions = gross - net = everything between what buyer paid and what seller receives
-        const allDeductions = grossAmount > 0 && netAmount > 0
-          ? grossAmount - netAmount
-          : feeAmount; // fallback to just fees if gross/net not available
-
-        // Get order details from fulfillment data
-        const orderInfo = orderMap.get(orderId);
-
-        // Store gross as sale_price, all deductions as platform_fees
-        // Supabase profit = sale_price - shipping_cost - platform_fees - cost
-        // = gross - 0 - allDeductions - cost = net_payout - cost
-        allOrders.push({
-          title: orderInfo?.title || 'eBay Sale',
-          price: grossAmount || netAmount,  // sale_price = gross (what buyer paid)
-          soldDate: (tx.transactionDate as string) || orderInfo?.creationDate || '',
-          condition: '',
-          imageUrl: orderInfo?.imageUrl || '',
-          url: '',
-          platform: 'ebay',
-          shippingCost: 0,
-          platformFees: Math.round(allDeductions * 100) / 100,  // everything eBay deducted
-          buyerUsername: orderInfo?.buyerUsername || undefined,
-          orderId,
-        });
-      }
-
-      if (transactions.length < 200) break;
-      txOffset += transactions.length;
     }
 
-    // Finances API worked — clear the fallback flag
-    try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
+    // Combine SALE + SHIPPING_LABEL data per order
+    const allOrders: SoldItem[] = [];
 
-    console.log(`[ebay] getSales: ${allOrders.length} sales from Finances API (${orderMap.size} orders from Fulfillment)`);
+    for (const [orderId, sale] of saleTxMap) {
+      const orderInfo = orderMap.get(orderId);
+      const shippingLabel = shippingCostMap.get(orderId) || 0;
+
+      // sale_price = gross (what buyer paid excl. tax)
+      // platform_fees = eBay marketplace fees (FVF, payment processing, etc.)
+      // shipping_cost = shipping label purchased through eBay
+      // Supabase: profit = sale_price - shipping_cost - platform_fees - cost
+      //                   = gross - label - fees - cost = actual net payout - cost
+      allOrders.push({
+        title: orderInfo?.title || 'eBay Sale',
+        price: sale.gross,
+        soldDate: sale.date || orderInfo?.creationDate || '',
+        condition: '',
+        imageUrl: orderInfo?.imageUrl || '',
+        url: '',
+        platform: 'ebay',
+        shippingCost: Math.round(shippingLabel * 100) / 100,
+        platformFees: Math.round(sale.fees * 100) / 100,
+        buyerUsername: orderInfo?.buyerUsername || undefined,
+        orderId,
+      });
+    }
+
+    if (financesWorked) {
+      try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
+    }
+
+    console.log(`[ebay] getSales: ${allOrders.length} sales, ${shippingCostMap.size} shipping labels from Finances API`);
     return allOrders;
   },
 
