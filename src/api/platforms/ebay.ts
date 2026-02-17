@@ -26,6 +26,10 @@ const CONDITION_MAP: Record<string, string> = {
   'for parts': 'FOR_PARTS_OR_NOT_WORKING',
 };
 
+const REVERSE_CONDITION_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(CONDITION_MAP).map(([k, v]) => [v, k])
+);
+
 // All eBay API calls must go through our proxy to avoid CORS issues
 async function ebayGet(endpoint: string, token: string): Promise<Response> {
   const resp = await fetch('/api/ebay-proxy', {
@@ -185,17 +189,78 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async getListings(_params: ListingsQuery, token: string): Promise<PlatformListing[]> {
-    const response = await ebayGet('/sell/inventory/v1/offer?limit=100', token);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || 'Failed to fetch listings');
+    // Fetch inventory items (titles, images, condition)
+    const itemsMap = new Map<string, Record<string, unknown>>();
+    let itemsOffset = 0;
+    while (true) {
+      const resp = await ebayGet(
+        `/sell/inventory/v1/inventory_item?limit=200&offset=${itemsOffset}`,
+        token
+      );
+      const data = await resp.json();
+      if (!resp.ok) {
+        console.error('[ebay] getInventoryItems error:', resp.status, data);
+        break;
+      }
+      const items = (data.inventoryItems || []) as Record<string, unknown>[];
+      if (items.length === 0) break;
+      for (const item of items) {
+        itemsMap.set(item.sku as string, item);
+      }
+      if (items.length < 200) break;
+      itemsOffset += items.length;
+    }
 
-    return (data.offers || []).map((offer: Record<string, unknown>) => ({
-      externalId: String(offer.offerId || ''),
-      url: (offer.listing as Record<string, string>)?.listingId
-        ? `https://www.ebay.com/itm/${(offer.listing as Record<string, string>).listingId}`
-        : '',
-      status: offer.status === 'PUBLISHED' ? 'active' as const : 'ended' as const,
-    }));
+    // Fetch offers (prices, listing IDs, status)
+    const allListings: PlatformListing[] = [];
+    let offersOffset = 0;
+    while (true) {
+      const resp = await ebayGet(
+        `/sell/inventory/v1/offer?limit=200&offset=${offersOffset}`,
+        token
+      );
+      const data = await resp.json();
+      if (!resp.ok) {
+        console.error('[ebay] getOffers error:', resp.status, data);
+        if (resp.status === 401) throw new Error('eBay token expired');
+        break;
+      }
+      const offers = (data.offers || []) as Record<string, unknown>[];
+      if (offers.length === 0) break;
+
+      for (const offer of offers) {
+        const sku = offer.sku as string;
+        const invItem = itemsMap.get(sku);
+        const product = (invItem?.product || {}) as Record<string, unknown>;
+        const pricing = (offer.pricingSummary as Record<string, Record<string, string>>) || {};
+        const listing = (offer.listing as Record<string, string>) || {};
+        const listingId = listing.listingId || '';
+        const status = offer.status === 'PUBLISHED' ? 'active' as const : 'ended' as const;
+
+        // Map eBay condition codes back to readable names
+        const conditionRaw = (invItem?.condition as string) || '';
+        const conditionLabel = REVERSE_CONDITION_MAP[conditionRaw] || conditionRaw.toLowerCase().replace(/_/g, ' ');
+
+        allListings.push({
+          externalId: listingId || String(offer.offerId || ''),
+          url: listingId ? `https://www.ebay.com/itm/${listingId}` : '',
+          status,
+          title: (product.title as string) || '',
+          description: (product.description as string) || '',
+          price: Number(pricing.price?.value || 0),
+          images: (product.imageUrls as string[]) || [],
+          condition: conditionLabel,
+          category: (offer.categoryId as string) || '',
+          platformData: { sku, offerId: offer.offerId },
+        });
+      }
+
+      if (offers.length < 200) break;
+      offersOffset += offers.length;
+    }
+
+    console.log(`[ebay] getListings: found ${allListings.length} listings`);
+    return allListings;
   },
 
   async getSales(params: SalesQuery, token: string): Promise<SoldItem[]> {

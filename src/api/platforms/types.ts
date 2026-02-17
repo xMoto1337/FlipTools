@@ -19,6 +19,13 @@ export interface PlatformListing {
   url: string;
   status: 'active' | 'sold' | 'ended' | 'error';
   platformData?: Record<string, unknown>;
+  // Extended fields for listing sync
+  title?: string;
+  description?: string;
+  price?: number;
+  images?: string[];
+  condition?: string;
+  category?: string;
 }
 
 export interface SoldItem {

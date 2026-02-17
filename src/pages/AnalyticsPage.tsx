@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
 import { analyticsApi } from '../api/analytics';
@@ -34,6 +35,7 @@ export default function AnalyticsPage() {
     getDateRangeStart,
   } = useAnalyticsStore();
 
+  const location = useLocation();
   const { isFree } = useSubscription();
   const { allowed: advancedAllowed } = useFeatureGate('advanced-analytics');
   const [syncError, setSyncError] = useState('');
@@ -76,7 +78,7 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     syncAndLoad();
-  }, [dateRange, platformFilter, isAuthenticated]);
+  }, [dateRange, platformFilter, isAuthenticated, location.key]);
 
   // Get unique platforms from sales data for filter
   const platforms = [...new Set(sales.map((s) => s.platform))];

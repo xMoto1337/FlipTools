@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useInventoryStore } from '../stores/inventoryStore';
 import { useRequireAuth } from '../hooks/useRequireAuth';
@@ -24,6 +25,7 @@ export default function InventoryPage() {
     totalItems,
   } = useInventoryStore();
 
+  const location = useLocation();
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -52,7 +54,7 @@ export default function InventoryPage() {
       }
     };
     load();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, location.key]);
 
   const handleAdd = async () => {
     try {

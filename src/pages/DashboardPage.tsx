@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
@@ -26,6 +26,7 @@ export default function DashboardPage() {
   } = useAnalyticsStore();
   const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export default function DashboardPage() {
     };
 
     syncAndLoad();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, location.key]);
 
   const activeListings = listings.filter((l) => l.status === 'active').length;
   const draftListings = listings.filter((l) => l.status === 'draft').length;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { adminApi } from '../api/admin';
 import type { AdminUser } from '../api/admin';
@@ -7,6 +7,7 @@ import { formatCurrency } from '../utils/formatters';
 
 export default function AdminPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAdmin, isAuthenticated } = useAuthStore();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [counts, setCounts] = useState({ total: 0, free: 0, pro: 0, lifetime: 0 });
@@ -22,7 +23,7 @@ export default function AdminPage() {
       return;
     }
     loadData();
-  }, [isAuthenticated, isAdmin, navigate]);
+  }, [isAuthenticated, isAdmin, navigate, location.key]);
 
   const loadData = async () => {
     setLoading(true);

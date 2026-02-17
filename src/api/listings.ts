@@ -1,4 +1,7 @@
 import { supabase } from './supabase';
+import { usePlatformStore } from '../stores/platformStore';
+import { getPlatform, getPlatformIds } from './platforms';
+import { analyticsApi } from './analytics';
 
 export interface Listing {
   id: string;
@@ -148,5 +151,143 @@ export const listingsApi = {
       .getPublicUrl(fileName);
 
     return data.publicUrl;
+  },
+
+  /**
+   * Sync listings from all connected platforms into Supabase.
+   * Fetches active listings from each platform API and upserts them.
+   */
+  async syncPlatformListings(): Promise<{ synced: number; total: number; errors: string[] }> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { isConnected } = usePlatformStore.getState();
+    let totalSynced = 0;
+    let totalFetched = 0;
+    const errors: string[] = [];
+
+    for (const platformId of getPlatformIds()) {
+      if (!isConnected(platformId)) continue;
+
+      // Refresh token if expired
+      const token = await analyticsApi._ensureFreshToken(platformId);
+      if (!token) {
+        errors.push(`${platformId}: token expired — reconnect in Settings`);
+        continue;
+      }
+
+      try {
+        const adapter = getPlatform(platformId);
+        const platformListings = await adapter.getListings({}, token);
+
+        console.log(`[sync] ${platformId}: fetched ${platformListings.length} listings`);
+        totalFetched += platformListings.length;
+
+        if (platformListings.length === 0) continue;
+
+        // Get existing listings that have this platform's external ID
+        // The platforms JSONB column stores: { "ebay": { "id": "123", ... } }
+        const { data: existing } = await supabase
+          .from('listings')
+          .select('id, platforms')
+          .eq('user_id', user.id);
+
+        // Build a set of existing external IDs for this platform
+        const existingByExternalId = new Map<string, string>();
+        for (const row of existing || []) {
+          const platData = (row.platforms as Record<string, { id: string }>)?.[platformId];
+          if (platData?.id) {
+            existingByExternalId.set(platData.id, row.id);
+          }
+        }
+
+        // Separate into new and existing listings
+        const newListings = [];
+        const updatedListings = [];
+
+        for (const item of platformListings) {
+          if (!item.externalId) continue;
+          const existingId = existingByExternalId.get(item.externalId);
+
+          const platformInfo = {
+            [platformId]: {
+              id: item.externalId,
+              url: item.url,
+              status: item.status,
+            },
+          };
+
+          if (existingId) {
+            // Update existing listing
+            updatedListings.push({
+              dbId: existingId,
+              status: item.status === 'active' ? 'active' as const : item.status === 'sold' ? 'sold' as const : 'ended' as const,
+              price: item.price || undefined,
+              images: item.images?.length ? item.images : undefined,
+              platforms: platformInfo,
+            });
+          } else {
+            // Insert new listing
+            newListings.push({
+              user_id: user.id,
+              title: item.title || 'Untitled',
+              description: item.description || null,
+              price: item.price || null,
+              category: item.category || null,
+              condition: item.condition || null,
+              images: item.images || [],
+              status: item.status === 'active' ? 'active' : item.status === 'sold' ? 'sold' : 'ended',
+              platforms: platformInfo,
+              tags: [],
+            });
+          }
+        }
+
+        // Insert new listings
+        if (newListings.length > 0) {
+          console.log(`[sync] ${platformId}: inserting ${newListings.length} new listings`);
+          const { error: insertErr } = await supabase.from('listings').insert(newListings);
+          if (insertErr) {
+            console.error(`[sync] Listing insert failed for ${platformId}:`, insertErr);
+            errors.push(`${platformId}: ${insertErr.message}`);
+          } else {
+            totalSynced += newListings.length;
+          }
+        }
+
+        // Update existing listings (status + price)
+        for (const item of updatedListings) {
+          const updates: Record<string, unknown> = {
+            status: item.status,
+            platforms: item.platforms,
+            updated_at: new Date().toISOString(),
+          };
+          if (item.price !== undefined) updates.price = item.price;
+          if (item.images !== undefined) updates.images = item.images;
+
+          const { error: updateErr } = await supabase
+            .from('listings')
+            .update(updates)
+            .eq('id', item.dbId);
+
+          if (updateErr) {
+            console.error(`[sync] Listing update failed:`, updateErr);
+          } else {
+            totalSynced++;
+          }
+        }
+
+        if (newListings.length === 0 && updatedListings.length === 0) {
+          console.log(`[sync] ${platformId}: no listings to sync`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[sync] Failed to sync ${platformId} listings:`, msg);
+        errors.push(`${platformId}: ${msg}`);
+      }
+    }
+
+    console.log(`[sync] Listings done — synced ${totalSynced}/${totalFetched}, errors: ${errors.length}`);
+    return { synced: totalSynced, total: totalFetched, errors };
   },
 };

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
 import { useRequireAuth } from '../hooks/useRequireAuth';
@@ -28,6 +29,9 @@ export default function ListingsPage() {
     filteredListings,
   } = useListingStore();
 
+  const location = useLocation();
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
   const [showEditor, setShowEditor] = useState(false);
   const [editorData, setEditorData] = useState<ListingInput>({
     title: '',
@@ -41,7 +45,24 @@ export default function ListingsPage() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    const load = async () => {
+    const syncAndLoad = async () => {
+      setSyncError('');
+
+      // Sync platform listings first
+      setIsSyncing(true);
+      try {
+        const result = await listingsApi.syncPlatformListings();
+        if (result.errors.length > 0) {
+          setSyncError(result.errors.join('; '));
+        }
+      } catch (err) {
+        console.error('Listing sync error:', err);
+        setSyncError(err instanceof Error ? err.message : 'Sync failed');
+      } finally {
+        setIsSyncing(false);
+      }
+
+      // Then load from Supabase
       setLoading(true);
       try {
         const data = await listingsApi.getAll();
@@ -52,8 +73,8 @@ export default function ListingsPage() {
         setLoading(false);
       }
     };
-    load();
-  }, [isAuthenticated]);
+    syncAndLoad();
+  }, [isAuthenticated, location.key]);
 
   const handleCreate = async () => {
     try {
@@ -84,12 +105,32 @@ export default function ListingsPage() {
       <div className="page-header">
         <h1>Listings</h1>
         <div className="page-header-actions">
+          {isSyncing && (
+            <span style={{ fontSize: 12, color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="spinner" style={{ width: 14, height: 14 }} />
+              Syncing...
+            </span>
+          )}
           <button className="btn btn-primary" onClick={requireAuth(() => setShowEditor(true), 'Sign in to create listings')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             New Listing
           </button>
         </div>
       </div>
+
+      {syncError && (
+        <div style={{
+          padding: '10px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          background: 'rgba(255,59,48,0.1)',
+          border: '1px solid var(--neon-red)',
+          color: 'var(--neon-red)',
+          fontSize: 13,
+        }}>
+          Sync issue: {syncError}
+        </div>
+      )}
 
       <div className="toolbar">
         <div className="toolbar-left">
