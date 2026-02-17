@@ -272,13 +272,9 @@ export const ebayAdapter: PlatformAdapter = {
       orderBy: 'creationdate',
     });
 
-    const filters: string[] = [];
-    if (params.startDate) {
-      filters.push(`creationdate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`);
-    }
-    if (filters.length > 0) {
-      fulfillmentParams.set('filter', filters.join(','));
-    }
+    // Always pass a date filter — without one, eBay only returns ~90 days
+    const startDate = params.startDate || new Date(Date.now() - 3 * 365 * 86400000).toISOString();
+    fulfillmentParams.set('filter', `creationdate:[${new Date(startDate).toISOString()}..${new Date().toISOString()}]`);
 
     const allOrders: SoldItem[] = [];
     let offset = 0;
