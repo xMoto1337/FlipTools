@@ -6,15 +6,28 @@ export const usePlatform = (platformId: PlatformId) => {
   const store = usePlatformStore();
   const adapter = getPlatform(platformId);
 
-  const connect = () => {
-    const authUrl = adapter.getAuthUrl();
-    const popup = window.open(authUrl, 'ebay-auth', 'width=600,height=700');
+  const connect = async () => {
+    let authUrl: string;
+
+    // Etsy requires async PKCE auth URL generation
+    if (platformId === 'etsy') {
+      const { getEtsyAuthUrl } = await import('../api/platforms/etsy');
+      authUrl = await getEtsyAuthUrl();
+    } else {
+      authUrl = adapter.getAuthUrl();
+    }
+
+    if (!authUrl) {
+      console.error(`[usePlatform] No auth URL for ${platformId}`);
+      return;
+    }
+
+    const popup = window.open(authUrl, `${platformId}-auth`, 'width=600,height=700');
 
     // Listen for the popup to complete and close
     const checkInterval = setInterval(() => {
       if (popup?.closed) {
         clearInterval(checkInterval);
-        // Re-read from localStorage since persist middleware saved there
         window.location.reload();
       }
     }, 500);
@@ -22,6 +35,10 @@ export const usePlatform = (platformId: PlatformId) => {
 
   const disconnect = () => {
     store.removeConnection(platformId);
+    // Clean up platform-specific data
+    if (platformId === 'etsy') {
+      try { localStorage.removeItem('fliptools_etsy_shop_id'); } catch {}
+    }
   };
 
   return {

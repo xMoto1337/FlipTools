@@ -1,10 +1,12 @@
 import type { PlatformAdapter, PlatformId } from './types';
 import { ebayAdapter } from './ebay';
 import { depopAdapter } from './depop';
+import { etsyAdapter } from './etsy';
 
 const platformRegistry: Record<PlatformId, PlatformAdapter> = {
   ebay: ebayAdapter,
   depop: depopAdapter,
+  etsy: etsyAdapter,
 };
 
 export const getPlatform = (id: PlatformId): PlatformAdapter => {

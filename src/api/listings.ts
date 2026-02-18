@@ -124,6 +124,15 @@ export const listingsApi = {
     if (error) throw error;
   },
 
+  async bulkUpdate(ids: string[], updates: Partial<ListingInput>): Promise<void> {
+    const { error } = await supabase
+      .from('listings')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .in('id', ids);
+
+    if (error) throw error;
+  },
+
   async bulkDelete(ids: string[]): Promise<void> {
     const { error } = await supabase
       .from('listings')

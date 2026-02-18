@@ -15,6 +15,7 @@ import PricingPage from './pages/PricingPage';
 import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import AdminPage from './pages/AdminPage';
 import EbayCallbackPage from './pages/EbayCallbackPage';
+import EtsyCallbackPage from './pages/EtsyCallbackPage';
 
 export default function App() {
   // Initialize auth listener
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/payment-success" element={<PaymentSuccessPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/ebay/callback" element={<EbayCallbackPage />} />
+        <Route path="/auth/etsy/callback" element={<EtsyCallbackPage />} />
       </Route>
 
       {/* Catch-all redirect */}

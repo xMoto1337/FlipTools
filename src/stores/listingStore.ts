@@ -23,6 +23,7 @@ interface ListingState {
   setListings: (listings: Listing[]) => void;
   addListing: (listing: Listing) => void;
   updateListing: (id: string, updates: Partial<Listing>) => void;
+  updateListings: (ids: string[], updates: Partial<Listing>) => void;
   removeListing: (id: string) => void;
   removeListings: (ids: string[]) => void;
 
@@ -68,6 +69,10 @@ export const useListingStore = create<ListingState>()((set, get) => ({
   updateListing: (id, updates) =>
     set((s) => ({
       listings: s.listings.map((l) => (l.id === id ? { ...l, ...updates } : l)),
+    })),
+  updateListings: (ids, updates) =>
+    set((s) => ({
+      listings: s.listings.map((l) => (ids.includes(l.id) ? { ...l, ...updates } : l)),
     })),
   removeListing: (id) =>
     set((s) => ({

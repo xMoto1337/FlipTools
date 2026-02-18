@@ -63,7 +63,7 @@ export interface SalesQuery {
   limit?: number;
 }
 
-export type PlatformId = 'ebay' | 'depop';
+export type PlatformId = 'ebay' | 'depop' | 'etsy';
 
 export interface PlatformAdapter {
   name: string;

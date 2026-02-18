@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { usePlatformStore } from '../stores/platformStore';
 import { supabase } from '../api/supabase';
 import { authApi } from '../api/auth';
 
@@ -16,6 +17,8 @@ export const useAuth = () => {
           const subscription = await authApi.getSubscription();
           store.setUser(profile);
           store.setSubscription(subscription);
+          // Hydrate platform connections from Supabase (in case localStorage cleared)
+          usePlatformStore.getState().loadFromSupabase();
         } else {
           store.setUser(null);
           store.setSubscription(null);

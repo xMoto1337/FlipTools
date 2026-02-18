@@ -7,6 +7,7 @@ import type { PlatformId } from '../api/platforms';
 import { useFeatureGate } from '../hooks/useSubscription';
 import { PaywallGate } from '../components/Subscription/PaywallGate';
 import { formatCurrency } from '../utils/formatters';
+import { supabase } from '../api/supabase';
 
 export default function CrossListPage() {
   const { requireAuth } = useRequireAuth();
@@ -58,7 +59,7 @@ export default function CrossListPage() {
 
         try {
           const adapter = getPlatform(platformId);
-          await adapter.createListing(
+          const result = await adapter.createListing(
             {
               title: listing.title,
               description: listing.description || '',
@@ -70,6 +71,16 @@ export default function CrossListPage() {
             },
             token
           );
+
+          // Save cross-listing mapping to Supabase (critical for auto-delist)
+          const updatedPlatforms = {
+            ...listing.platforms,
+            [platformId]: { id: result.externalId, url: result.url, status: result.status },
+          };
+          await supabase.from('listings').update({ platforms: updatedPlatforms }).eq('id', listingId);
+          // Also update local state
+          listing.platforms = updatedPlatforms;
+
           setCrossListStatus((s) => ({ ...s, [`${listingId}-${platformId}`]: 'Success' }));
         } catch (err) {
           setCrossListStatus((s) => ({

@@ -6,7 +6,7 @@ import { usePlatform } from '../hooks/usePlatform';
 import { authApi } from '../api/auth';
 import { stripeApi } from '../api/stripe';
 
-function PlatformConnectionCard({ platformId }: { platformId: 'ebay' | 'depop' }) {
+function PlatformConnectionCard({ platformId }: { platformId: 'ebay' | 'depop' | 'etsy' }) {
   const { adapter, isConnected, connect, disconnect } = usePlatform(platformId);
 
   return (
@@ -137,6 +137,7 @@ export default function SettingsPage() {
         <div className="settings-section">
           <div className="settings-section-title">Platform Connections</div>
           <PlatformConnectionCard platformId="ebay" />
+          <PlatformConnectionCard platformId="etsy" />
           <PlatformConnectionCard platformId="depop" />
         </div>
       </div>

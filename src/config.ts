@@ -19,6 +19,10 @@ export const config = {
     redirectUri: import.meta.env.VITE_EBAY_REDIRECT_URI || '',
     sandbox: import.meta.env.VITE_EBAY_SANDBOX === 'true',
   },
+  etsy: {
+    clientId: import.meta.env.VITE_ETSY_CLIENT_ID || '',
+    redirectUri: import.meta.env.VITE_ETSY_REDIRECT_URI || '',
+  },
   googleVision: {
     apiKey: import.meta.env.VITE_GOOGLE_VISION_API_KEY || '',
   },
