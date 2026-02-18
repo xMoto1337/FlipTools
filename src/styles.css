@@ -813,6 +813,11 @@ a:hover {
   color: #ff2300;
 }
 
+.platform-badge.etsy {
+  background: color-mix(in srgb, #f1641e 15%, transparent);
+  color: #f1641e;
+}
+
 /* ===== Status Badges ===== */
 .status-badge {
   display: inline-flex;

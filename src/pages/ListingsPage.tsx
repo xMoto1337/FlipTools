@@ -269,6 +269,69 @@ export default function ListingsPage() {
     setIsCrossListing(false);
   };
 
+  // Push to platforms state
+  const [pushStatus, setPushStatus] = useState<Record<string, string>>({});
+  const [isPushing, setIsPushing] = useState(false);
+
+  const pushListingToPlatforms = async (listingId: string) => {
+    const store = useListingStore.getState();
+    const listing = store.listings.find((l) => l.id === listingId);
+    if (!listing) return;
+
+    const platformEntries = Object.entries(listing.platforms);
+    if (platformEntries.length === 0) return;
+
+    for (const [platformId, platData] of platformEntries) {
+      const data = platData as { id?: string; url?: string; status?: string };
+      if (!data?.id) continue;
+
+      const token = getToken(platformId as PlatformId);
+      if (!token) {
+        setPushStatus((s) => ({ ...s, [`${listingId}-${platformId}`]: 'No token' }));
+        continue;
+      }
+
+      setPushStatus((s) => ({ ...s, [`${listingId}-${platformId}`]: 'Pushing...' }));
+      try {
+        const adapter = getPlatform(platformId as PlatformId);
+        await adapter.updateListing(
+          data.id,
+          {
+            title: listing.title,
+            description: listing.description || '',
+            price: listing.price || 0,
+            category: listing.category || '',
+            condition: listing.condition || 'good',
+            images: listing.images,
+            tags: listing.tags,
+          },
+          token
+        );
+        setPushStatus((s) => ({ ...s, [`${listingId}-${platformId}`]: 'Pushed' }));
+      } catch (err) {
+        setPushStatus((s) => ({ ...s, [`${listingId}-${platformId}`]: `Failed` }));
+        console.error(`Push to ${platformId} failed:`, err);
+      }
+    }
+  };
+
+  const handleBulkPush = async () => {
+    setIsPushing(true);
+    setPushStatus({});
+    for (const id of selectedIds) {
+      await pushListingToPlatforms(id);
+    }
+    setIsPushing(false);
+    // Clear push status after 3 seconds
+    setTimeout(() => setPushStatus({}), 3000);
+  };
+
+  const handleSinglePush = async (listingId: string) => {
+    setPushStatus({});
+    await pushListingToPlatforms(listingId);
+    setTimeout(() => setPushStatus({}), 3000);
+  };
+
   const openBulkEdit = () => {
     setEditFields({ price: false, cost: false, category: false, condition: false });
     setPriceMode('set');
@@ -480,6 +543,11 @@ export default function ListingsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
             Cross-List
           </button>
+          <button className="btn btn-sm btn-secondary" onClick={requireAuth(handleBulkPush, 'Sign in to push changes')} disabled={isPushing}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+            {isPushing ? 'Pushing...' : 'Push to Platforms'}
+          </button>
+          <div style={{ width: 1, height: 20, background: 'var(--border-color)', margin: '0 4px' }} />
           <button className="btn btn-sm btn-danger" onClick={() => setShowDeleteConfirm(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
             Delete
@@ -509,7 +577,10 @@ export default function ListingsPage() {
         <div className="listing-grid">
           {paginated.map((listing) => {
             const platformEntries = Object.entries(listing.platforms);
-            const firstPlatformUrl = platformEntries.length > 0 ? (platformEntries[0][1] as { url?: string })?.url : null;
+            const platformCount = platformEntries.length;
+            const profit = (listing.price || 0) - (listing.cost || 0);
+            const pushKey = Object.keys(pushStatus).find((k) => k.startsWith(listing.id));
+            const pushMsg = pushKey ? pushStatus[pushKey] : null;
 
             return (
               <div
@@ -517,31 +588,39 @@ export default function ListingsPage() {
                 className={`listing-card ${selectedIds.has(listing.id) ? 'selected' : ''}`}
                 onClick={() => toggleSelect(listing.id)}
               >
-                {listing.images[0] ? (
-                  <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
-                ) : (
-                  <div className="listing-image-placeholder">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                  </div>
-                )}
+                <div style={{ position: 'relative' }}>
+                  {listing.images[0] ? (
+                    <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
+                  ) : (
+                    <div className="listing-image-placeholder">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </div>
+                  )}
+                  {platformCount > 0 && (
+                    <div style={{
+                      position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+                      borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, color: 'var(--neon-cyan)',
+                      display: 'flex', gap: 4, alignItems: 'center',
+                    }}>
+                      {platformEntries.map(([p]) => (
+                        <span key={p} className={`platform-badge ${p}`} style={{ fontSize: 9, padding: '1px 5px', margin: 0 }}>{p}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="listing-body">
                   <div className="listing-title">{listing.title}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
                     <div className="listing-price">{formatCurrency(listing.price || 0)}</div>
-                    {firstPlatformUrl && (
-                      <a
-                        href={firstPlatformUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn btn-ghost btn-sm"
-                        title="View on platform"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ padding: '2px 6px', fontSize: 11 }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                      </a>
+                    {listing.cost != null && listing.cost > 0 && (
+                      <span style={{ fontSize: 12, color: profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)' }}>
+                        {profit >= 0 ? '+' : ''}{formatCurrency(profit)} profit
+                      </span>
                     )}
                   </div>
+                  {listing.cost != null && listing.cost > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Cost: {formatCurrency(listing.cost)}</div>
+                  )}
                   <div className="listing-meta">
                     <span className={`status-badge ${listing.status}`}>
                       <span className="status-dot" />
@@ -551,11 +630,11 @@ export default function ListingsPage() {
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{listing.condition}</span>
                     )}
                   </div>
-                  <div className="listing-platforms">
-                    {Object.keys(listing.platforms).map((p) => (
-                      <span key={p} className={`platform-badge ${p}`}>{p}</span>
-                    ))}
-                  </div>
+                  {pushMsg && (
+                    <div style={{ fontSize: 11, marginTop: 4, color: pushMsg === 'Pushed' ? 'var(--neon-green)' : pushMsg === 'Pushing...' ? 'var(--neon-cyan)' : 'var(--neon-orange)' }}>
+                      {pushMsg}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -570,29 +649,32 @@ export default function ListingsPage() {
                   <input type="checkbox" className="table-checkbox" onChange={() => selectedIds.size === paginated.length ? clearSelection() : selectAll()} checked={selectedIds.size === paginated.length && paginated.length > 0} />
                 </th>
                 <th style={{ width: 50 }}></th>
-                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('title')}>
+                <th style={{ cursor: 'pointer', minWidth: 200 }} onClick={() => handleSort('title')}>
                   Title <SortIcon field="title" />
                 </th>
                 <th style={{ cursor: 'pointer' }} onClick={() => handleSort('price')}>
                   Price <SortIcon field="price" />
                 </th>
+                <th>Cost</th>
+                <th>Profit</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => handleSort('status')}>
                   Status <SortIcon field="status" />
                 </th>
-                <th>Condition</th>
-                <th>Category</th>
                 <th>Platforms</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => handleSort('created_at')}>
                   Listed <SortIcon field="created_at" />
                 </th>
-                <th style={{ width: 60 }}></th>
+                <th style={{ width: 80 }}></th>
               </tr>
             </thead>
             <tbody>
               {paginated.map((listing) => {
-                // Get the first platform URL for "View" link
                 const platformEntries = Object.entries(listing.platforms);
                 const firstPlatformUrl = platformEntries.length > 0 ? (platformEntries[0][1] as { url?: string })?.url : null;
+                const profit = (listing.price || 0) - (listing.cost || 0);
+                const hasCost = listing.cost != null && listing.cost > 0;
+                const pushKey = Object.keys(pushStatus).find((k) => k.startsWith(listing.id));
+                const pushMsg = pushKey ? pushStatus[pushKey] : null;
 
                 return (
                   <tr key={listing.id}>
@@ -608,35 +690,55 @@ export default function ListingsPage() {
                         </div>
                       )}
                     </td>
-                    <td style={{ maxWidth: 250 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</div>
+                    <td>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{listing.title}</div>
+                      {listing.condition && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{listing.condition}{listing.category ? ` / ${listing.category}` : ''}</div>}
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--neon-green)' }}>{formatCurrency(listing.price || 0)}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{hasCost ? formatCurrency(listing.cost!) : '—'}</td>
+                    <td style={{ fontWeight: 600, color: hasCost ? (profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)') : 'var(--text-muted)', fontSize: 13 }}>
+                      {hasCost ? `${profit >= 0 ? '+' : ''}${formatCurrency(profit)}` : '—'}
+                    </td>
                     <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.condition || '—'}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{listing.category ? listing.category.charAt(0).toUpperCase() + listing.category.slice(1) : '—'}</td>
                     <td>
                       <div className="listing-platforms" style={{ marginTop: 0 }}>
                         {Object.keys(listing.platforms).map((p) => (
                           <span key={p} className={`platform-badge ${p}`}>{p}</span>
                         ))}
+                        {platformEntries.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
                       </div>
                     </td>
-                    <td style={{ color: 'var(--text-muted)' }}>{formatTimeAgo(listing.created_at)}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{formatTimeAgo(listing.created_at)}</td>
                     <td>
-                      {firstPlatformUrl && (
-                        <a
-                          href={firstPlatformUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn btn-ghost btn-sm"
-                          title="View on platform"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ padding: '4px 8px' }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                        </a>
-                      )}
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        {platformEntries.length > 0 && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            title={pushMsg || 'Push changes to platforms'}
+                            onClick={(e) => { e.stopPropagation(); handleSinglePush(listing.id); }}
+                            style={{ padding: '4px 6px', color: pushMsg === 'Pushed' ? 'var(--neon-green)' : pushMsg === 'Failed' ? 'var(--neon-red)' : undefined }}
+                          >
+                            {pushMsg === 'Pushing...' ? (
+                              <div className="spinner" style={{ width: 14, height: 14 }} />
+                            ) : (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+                            )}
+                          </button>
+                        )}
+                        {firstPlatformUrl && (
+                          <a
+                            href={firstPlatformUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-ghost btn-sm"
+                            title="View on platform"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ padding: '4px 6px' }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                          </a>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -917,78 +1019,114 @@ export default function ListingsPage() {
             </div>
             <div className="modal-body">
               {/* Platform selection */}
-              <div style={{ marginBottom: 20 }}>
-                <label className="form-label" style={{ marginBottom: 8 }}>Target Platforms</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {platforms.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`btn ${crossListTargets.has(p.id) ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => {
-                        const next = new Set(crossListTargets);
-                        if (next.has(p.id)) next.delete(p.id);
-                        else next.add(p.id);
-                        setCrossListTargets(next);
-                      }}
-                      disabled={!isConnected(p.id) || isCrossListing}
-                    >
-                      {p.name}
-                      {!isConnected(p.id) && <span style={{ fontSize: 11, opacity: 0.7 }}> (not connected)</span>}
-                    </button>
-                  ))}
+              <div style={{ marginBottom: 20, padding: 16, background: 'var(--bg-dark)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
+                <label className="form-label" style={{ marginBottom: 10, fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>Select Target Platforms</label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {platforms.map((p) => {
+                    const connected = isConnected(p.id);
+                    const selected = crossListTargets.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          const next = new Set(crossListTargets);
+                          if (next.has(p.id)) next.delete(p.id);
+                          else next.add(p.id);
+                          setCrossListTargets(next);
+                        }}
+                        disabled={!connected || isCrossListing}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px',
+                          borderRadius: 8, border: `2px solid ${selected ? p.color : 'var(--border-color)'}`,
+                          background: selected ? `color-mix(in srgb, ${p.color} 10%, transparent)` : 'var(--bg-card)',
+                          color: connected ? 'var(--text-primary)' : 'var(--text-muted)',
+                          cursor: connected ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 500,
+                          opacity: connected ? 1 : 0.5, transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <span className={`platform-badge ${p.id}`} style={{ fontSize: 10, padding: '2px 6px' }}>{p.id}</span>
+                        {p.name}
+                        {!connected && <span style={{ fontSize: 11, opacity: 0.7 }}>(connect in Settings)</span>}
+                        {selected && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Fee preview & status */}
+              {/* Items list with fee preview */}
               {crossListTargets.size > 0 && (
-                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Listing</th>
-                        {[...crossListTargets].map((p) => (
-                          <th key={p}>{p} Fees</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...selectedIds].map((id) => {
-                        const listing = allListings.find((l) => l.id === id);
-                        if (!listing) return null;
-                        return (
-                          <tr key={id}>
-                            <td style={{ maxWidth: 200 }}>
-                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</div>
-                            </td>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 350, overflowY: 'auto' }}>
+                  {[...selectedIds].map((id) => {
+                    const listing = allListings.find((l) => l.id === id);
+                    if (!listing) return null;
+                    return (
+                      <div key={id} style={{
+                        display: 'flex', gap: 12, padding: 12, borderRadius: 10,
+                        border: '1px solid var(--border-color)', background: 'var(--bg-card)',
+                      }}>
+                        {/* Thumbnail */}
+                        <div style={{ flexShrink: 0 }}>
+                          {listing.images[0] ? (
+                            <img src={listing.images[0]} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: 56, height: 56, borderRadius: 8, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                            </div>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4 }}>{listing.title}</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--neon-green)', marginBottom: 6 }}>{formatCurrency(listing.price || 0)}</div>
+                          {/* Already listed on */}
+                          {Object.keys(listing.platforms).length > 0 && (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'flex', gap: 4, alignItems: 'center' }}>
+                              Already on: {Object.keys(listing.platforms).map((p) => (
+                                <span key={p} className={`platform-badge ${p}`} style={{ fontSize: 9, padding: '1px 5px' }}>{p}</span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Per-platform fee + status */}
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                             {[...crossListTargets].map((p) => {
+                              const alreadyListed = !!listing.platforms[p];
                               const adapter = getPlatform(p);
                               const fees = adapter.calculateFees(listing.price || 0);
                               const statusKey = `${id}-${p}`;
                               const status = crossListStatus[statusKey];
                               return (
-                                <td key={p}>
-                                  <div style={{ fontSize: 12 }}>
-                                    Fees: {formatCurrency(fees.totalFees)}
-                                    <br />
-                                    Net: <span style={{ color: 'var(--neon-green)' }}>{formatCurrency(fees.netProceeds)}</span>
-                                  </div>
+                                <div key={p} style={{
+                                  fontSize: 12, padding: '6px 10px', borderRadius: 6,
+                                  background: 'var(--bg-dark)', border: '1px solid var(--border-color)',
+                                  opacity: alreadyListed ? 0.5 : 1,
+                                }}>
+                                  <span className={`platform-badge ${p}`} style={{ fontSize: 9, padding: '1px 5px', marginRight: 6 }}>{p}</span>
+                                  {alreadyListed ? (
+                                    <span style={{ color: 'var(--text-muted)' }}>Already listed</span>
+                                  ) : (
+                                    <>
+                                      <span style={{ color: 'var(--text-muted)' }}>Fees: {formatCurrency(fees.totalFees)}</span>
+                                      <span style={{ marginLeft: 8, color: 'var(--neon-green)' }}>Net: {formatCurrency(fees.netProceeds)}</span>
+                                    </>
+                                  )}
                                   {status && (
-                                    <div style={{
-                                      fontSize: 11, marginTop: 4,
+                                    <span style={{
+                                      marginLeft: 8, fontWeight: 600,
                                       color: status === 'Success' ? 'var(--neon-green)' : status === 'Listing...' ? 'var(--neon-cyan)' : 'var(--neon-orange)',
                                     }}>
                                       {status === 'Listing...' && <span className="spinner" style={{ width: 10, height: 10, display: 'inline-block', marginRight: 4 }} />}
                                       {status}
-                                    </div>
+                                    </span>
                                   )}
-                                </td>
+                                </div>
                               );
                             })}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
