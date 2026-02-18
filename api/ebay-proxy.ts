@@ -122,6 +122,14 @@ async function handleTradingApi(
       return res.status(200).json(parsed);
     }
 
+    if (callName === 'ReviseItem') {
+      // Extract ItemID from response to confirm success
+      const itemIdMatch = xmlText.match(/<ItemID>(\d+)<\/ItemID>/);
+      const feesMatch = xmlText.match(/<Fee>[\s\S]*?<\/Fee>/g);
+      console.log(`Trading API ReviseItem: Ack=${ack}, ItemID=${itemIdMatch?.[1]}, fees=${feesMatch?.length || 0}`);
+      return res.status(200).json({ ok: true, ack, itemId: itemIdMatch?.[1] });
+    }
+
     // Default: return raw XML as text
     return res.status(200).json({ xml: xmlText, ack });
   } catch (err) {

@@ -17,6 +17,15 @@ const EBAY_AUTH_URL = IS_SANDBOX
   ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
   : 'https://auth.ebay.com/oauth2/authorize';
 
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 const CONDITION_MAP: Record<string, string> = {
   'new': 'NEW',
   'like new': 'LIKE_NEW',
@@ -153,16 +162,43 @@ export const ebayAdapter: PlatformAdapter = {
   },
 
   async updateListing(externalId: string, listing: Partial<ListingData>, token: string): Promise<PlatformListing> {
-    const response = await ebayPost(`/sell/inventory/v1/offer/${externalId}`, token, {
-      ...(listing.price && {
-        pricingSummary: { price: { value: listing.price.toFixed(2), currency: 'USD' } },
+    // Use Trading API ReviseItem — works with itemId (which is what synced listings store)
+    // The Inventory API offer endpoint requires offerId which we don't have for synced items
+    const itemFields: string[] = [];
+    itemFields.push(`<ItemID>${externalId}</ItemID>`);
+
+    if (listing.price !== undefined) {
+      itemFields.push(`<StartPrice currencyID="USD">${listing.price.toFixed(2)}</StartPrice>`);
+    }
+    if (listing.title) {
+      itemFields.push(`<Title>${escapeXml(listing.title)}</Title>`);
+    }
+    if (listing.description) {
+      itemFields.push(`<Description>${escapeXml(listing.description)}</Description>`);
+    }
+
+    const xmlBody = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">',
+      '  <Item>',
+      ...itemFields.map(f => `    ${f}`),
+      '  </Item>',
+      '</ReviseItemRequest>',
+    ].join('\n');
+
+    const response = await fetch('/api/ebay-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tradingApiCall: 'ReviseItem',
+        token,
+        payload: xmlBody,
       }),
-      ...(listing.description && { listingDescription: listing.description }),
     });
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.message || 'Update failed');
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || 'Update failed');
     }
 
     return {
