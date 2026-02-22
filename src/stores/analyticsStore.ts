@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Sale, SalesStats } from '../api/analytics';
 
-type DateRange = '7d' | '30d' | '90d' | '1y' | 'all';
+type DateRange = '7d' | '30d' | '90d' | '1y' | '2y';
 
 interface AnalyticsState {
   sales: Sale[];
@@ -27,7 +27,7 @@ interface AnalyticsState {
 export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
   sales: [],
   stats: null,
-  dateRange: 'all',
+  dateRange: '2y',
   platformFilter: '',
   isLoading: false,
   isSyncing: false,
@@ -50,7 +50,7 @@ export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
       case '30d': return new Date(now.getTime() - 30 * 86400000).toISOString();
       case '90d': return new Date(now.getTime() - 90 * 86400000).toISOString();
       case '1y': return new Date(now.getTime() - 365 * 86400000).toISOString();
-      case 'all': return undefined;
+      case '2y': return new Date(now.getTime() - 2 * 365 * 86400000).toISOString();
     }
   },
 }));

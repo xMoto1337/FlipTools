@@ -3,22 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useListingStore } from '../stores/listingStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
-import { useInventoryStore } from '../stores/inventoryStore';
-import { useRequireAuth } from '../hooks/useRequireAuth';
 import { analyticsApi } from '../api/analytics';
 import { listingsApi } from '../api/listings';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 export default function DashboardPage() {
   const { subscription, isAuthenticated } = useAuthStore();
-  const { requireAuth } = useRequireAuth();
   const { listings, setListings } = useListingStore();
   const {
     isSyncing,
     setSyncing,
     setLastSyncedAt,
   } = useAnalyticsStore();
-  const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
   const [syncError, setSyncError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -105,8 +101,18 @@ export default function DashboardPage() {
   };
 
   const activeListings = listings.filter((l) => l.status === 'active').length;
-  const draftListings = listings.filter((l) => l.status === 'draft').length;
-  const topSales = recentSales.slice(0, 5);
+  const soldListings = listings.filter((l) => l.status === 'sold').length;
+
+  // Platform performance breakdown from recent sales
+  const platformBreakdown = recentSales.reduce<Record<string, { revenue: number; profit: number; count: number }>>((acc, sale) => {
+    const p = sale.platform || 'unknown';
+    if (!acc[p]) acc[p] = { revenue: 0, profit: 0, count: 0 };
+    acc[p].revenue += sale.sale_price || 0;
+    acc[p].profit += sale.profit || 0;
+    acc[p].count += 1;
+    return acc;
+  }, {});
+  const platformEntries = Object.entries(platformBreakdown).sort((a, b) => b[1].revenue - a[1].revenue);
 
   return (
     <div>
@@ -114,7 +120,7 @@ export default function DashboardPage() {
         <h1>Dashboard</h1>
         <div className="page-header-actions">
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Past 7 days</span>
-          <button className="btn btn-primary" onClick={requireAuth(() => navigate('/listings'), 'Sign in to create listings')}>
+          <button className="btn btn-primary" onClick={() => navigate('/listings')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             New Listing
           </button>
@@ -165,12 +171,14 @@ export default function DashboardPage() {
           <div className="stat-value">{dashStats?.totalSales || 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Inventory Value</div>
-          <div className="stat-value">{formatCurrency(totalValue())}</div>
+          <div className="stat-label">Avg Profit/Sale (7D)</div>
+          <div className={`stat-value ${(dashStats?.avgProfit || 0) >= 0 ? 'positive' : 'negative'}`}>
+            {formatCurrency(dashStats?.avgProfit || 0)}
+          </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Inventory Items</div>
-          <div className="stat-value">{totalItems()}</div>
+          <div className="stat-label">Total Sold</div>
+          <div className="stat-value">{soldListings}</div>
         </div>
       </div>
 
@@ -233,9 +241,9 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {(isSyncing || isRefreshing) && topSales.length === 0 ? (
+        {(isSyncing || isRefreshing) && recentSales.length === 0 ? (
           <div className="loading-spinner" style={{ padding: 32 }}><div className="spinner" /></div>
-        ) : topSales.length === 0 ? (
+        ) : recentSales.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
             {isAuthenticated
               ? syncError
@@ -255,18 +263,22 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {topSales.map((sale) => (
+              {recentSales.map((sale) => (
                 <tr key={sale.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {sale.item_image_url && (
+                      {sale.item_image_url ? (
                         <img
                           src={sale.item_image_url}
                           alt=""
-                          style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover' }}
+                          style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
                         />
+                      ) : (
+                        <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        </div>
                       )}
-                      <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {sale.item_title || sale.listing?.title || 'Unknown item'}
                       </span>
                     </div>
@@ -284,43 +296,76 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Bottom row: Platform Performance + Listing Health */}
       <div className="dashboard-grid">
+        {/* Platform Performance */}
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Quick Actions</div>
+            <div className="card-title">Platform Performance</div>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>All-time</span>
           </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button className="btn btn-secondary" onClick={requireAuth(() => navigate('/cross-list'), 'Sign in to cross-list items')}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
-              Cross List
-            </button>
-            <button className="btn btn-secondary" onClick={requireAuth(() => navigate('/research'), 'Sign in to use price research')}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Price Research
-            </button>
-            <button className="btn btn-secondary" onClick={requireAuth(() => navigate('/inventory'), 'Sign in to track inventory')}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-              Add Inventory
-            </button>
-          </div>
+          {platformEntries.length === 0 ? (
+            <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              No sales data yet
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {platformEntries.map(([platform, stats]) => {
+                const totalRevenue = platformEntries.reduce((s, [, v]) => s + v.revenue, 0);
+                const pct = totalRevenue > 0 ? Math.round((stats.revenue / totalRevenue) * 100) : 0;
+                const margin = stats.revenue > 0 ? Math.round((stats.profit / stats.revenue) * 100) : 0;
+                return (
+                  <div key={platform}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className={`platform-badge ${platform}`}>{platform}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{stats.count} sale{stats.count !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{formatCurrency(stats.revenue)}</div>
+                        <div style={{ fontSize: 11, color: stats.profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)' }}>
+                          {formatCurrency(stats.profit)} ({margin}% margin)
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 2, background: 'var(--neon-cyan)', transition: 'width 0.4s ease' }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
+        {/* Listing Health */}
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Listing Summary</div>
+            <div className="card-title">Listing Health</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/listings')} style={{ fontSize: 12 }}>
+              Manage
+            </button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Active</span>
-              <span className="status-badge active"><span className="status-dot" />{activeListings}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Drafts</span>
-              <span className="status-badge draft"><span className="status-dot" />{draftListings}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Total</span>
-              <span>{listings.length}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {[
+              { label: 'Active', count: activeListings, color: 'var(--neon-green)', total: listings.length },
+              { label: 'Sold', count: soldListings, color: 'var(--neon-cyan)', total: listings.length },
+              { label: 'Draft', count: listings.filter((l) => l.status === 'draft').length, color: 'var(--text-muted)', total: listings.length },
+              { label: 'Ended', count: listings.filter((l) => l.status === 'ended').length, color: 'var(--neon-red)', total: listings.length },
+            ].map(({ label, count, color, total }) => (
+              <div key={label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color }}>{count}</span>
+                </div>
+                <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: total > 0 ? `${Math.round((count / total) * 100)}%` : '0%', borderRadius: 2, background: color, transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+            ))}
+            <div style={{ paddingTop: 4, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
+              <span>Total listings</span>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{listings.length}</span>
             </div>
           </div>
         </div>

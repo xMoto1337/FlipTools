@@ -310,10 +310,13 @@ export const ebayAdapter: PlatformAdapter = {
     });
 
     // Always pass a date filter — without one, eBay only returns ~90 days
-    // Default to 2018 (when eBay Managed Payments started) to get all historical orders
-    // eBay requires dates WITHOUT milliseconds: 2018-01-01T00:00:00Z not 2018-01-01T00:00:00.000Z
+    // eBay Fulfillment API hard limit: start date must be within the past 2 years
+    // eBay requires dates WITHOUT milliseconds: 2024-01-01T00:00:00Z not 2024-01-01T00:00:00.000Z
     const toEbayDate = (iso: string) => iso.replace(/\.\d{3}Z$/, 'Z');
-    const startDate = params.startDate || '2018-01-01T00:00:00Z';
+    const twoYearsAgo = new Date(Date.now() - 2 * 365 * 24 * 60 * 60 * 1000).toISOString();
+    const startDate = params.startDate
+      ? (new Date(params.startDate) < new Date(twoYearsAgo) ? twoYearsAgo : params.startDate)
+      : twoYearsAgo;
     const endDate = toEbayDate(new Date().toISOString());
     fulfillmentParams.set('filter', `creationdate:[${toEbayDate(new Date(startDate).toISOString())}..${endDate}]`);
 

@@ -12,7 +12,7 @@ const dateRanges = [
   { value: '30d' as const, label: '30D' },
   { value: '90d' as const, label: '90D' },
   { value: '1y' as const, label: '1Y' },
-  { value: 'all' as const, label: 'All' },
+  { value: '2y' as const, label: '2Y' },
 ];
 
 export default function AnalyticsPage() {
@@ -130,7 +130,7 @@ export default function AnalyticsPage() {
           </button>
           <div className="date-range-picker">
             {dateRanges.map((r) => {
-              const isRestricted = isFree && (r.value === '90d' || r.value === '1y' || r.value === 'all');
+              const isRestricted = isFree && (r.value === '90d' || r.value === '1y' || r.value === '2y');
               return (
                 <button
                   key={r.value}
