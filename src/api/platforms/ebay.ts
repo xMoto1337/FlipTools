@@ -311,8 +311,11 @@ export const ebayAdapter: PlatformAdapter = {
 
     // Always pass a date filter — without one, eBay only returns ~90 days
     // Default to 2018 (when eBay Managed Payments started) to get all historical orders
-    const startDate = params.startDate || '2018-01-01T00:00:00.000Z';
-    fulfillmentParams.set('filter', `creationdate:[${new Date(startDate).toISOString()}..${new Date().toISOString()}]`);
+    // eBay requires dates WITHOUT milliseconds: 2018-01-01T00:00:00Z not 2018-01-01T00:00:00.000Z
+    const toEbayDate = (iso: string) => iso.replace(/\.\d{3}Z$/, 'Z');
+    const startDate = params.startDate || '2018-01-01T00:00:00Z';
+    const endDate = toEbayDate(new Date().toISOString());
+    fulfillmentParams.set('filter', `creationdate:[${toEbayDate(new Date(startDate).toISOString())}..${endDate}]`);
 
     const allOrders: SoldItem[] = [];
     let offset = 0;
@@ -323,9 +326,12 @@ export const ebayAdapter: PlatformAdapter = {
       const response = await ebayGet(`/sell/fulfillment/v1/order?${fulfillmentParams}`, token);
       const data = await response.json();
       if (!response.ok) {
+        const errMsg = data?.errors?.[0]?.message || data?.message || `HTTP ${response.status}`;
         console.error('[ebay] getSales fulfillment error:', response.status, data);
-        if (response.status === 401) throw new Error('eBay token expired');
-        break;
+        if (response.status === 401) throw new Error('eBay token expired — please reconnect in Settings');
+        if (response.status === 403) throw new Error(`eBay access denied — check your app scopes (${errMsg})`);
+        // For other errors (500, 429, etc.) throw so the caller can surface the error
+        throw new Error(`eBay sales fetch failed: ${errMsg}`);
       }
 
       const orders = data.orders || [];

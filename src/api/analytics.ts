@@ -287,10 +287,14 @@ export const analyticsApi = {
           item_image_url: item.imageUrl || null,
         }));
 
-        const { error } = await supabase.from('sales').insert(rows);
+        // Use upsert to handle any duplicate conflicts gracefully
+        const { error } = await supabase.from('sales').upsert(rows, {
+          onConflict: 'user_id,platform,external_id',
+          ignoreDuplicates: true,
+        });
 
         if (error) {
-          console.error(`[sync] Batch insert failed for ${platformId}:`, error);
+          console.error(`[sync] Batch upsert failed for ${platformId}:`, error);
           errors.push(`${platformId}: ${error.message}`);
         } else {
           totalSynced += newSales.length;

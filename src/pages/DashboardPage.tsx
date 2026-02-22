@@ -21,6 +21,8 @@ export default function DashboardPage() {
   const { totalValue, totalItems } = useInventoryStore();
   const navigate = useNavigate();
   const [syncError, setSyncError] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const mountedRef = useRef(true);
 
   // Dashboard-local state for 7-day window
@@ -35,65 +37,72 @@ export default function DashboardPage() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
+  const runSyncAndLoad = async (cancelled: { current: boolean }) => {
+    setSyncError('');
 
-    let cancelled = false;
-    const syncAndLoad = async () => {
-      setSyncError('');
-
-      // Only sync if not already syncing (prevents race conditions on tab switch)
-      const store = useAnalyticsStore.getState();
-      if (!store.isSyncing) {
-        setSyncing(true);
-        try {
-          const result = await analyticsApi.syncPlatformSales();
-          if (!cancelled) {
-            setLastSyncedAt(new Date().toISOString());
-            if (result.errors.length > 0) {
-              setSyncError(result.errors.join('; '));
-            }
-          }
-        } catch (err) {
-          if (!cancelled) {
-            console.error('Dashboard sync error:', err);
-            setSyncError(err instanceof Error ? err.message : 'Sync failed');
-          }
-        } finally {
-          setSyncing(false);
-        }
-      } else {
-        // Wait for existing sync to finish
-        console.log('[dashboard] Sync already in progress, waiting...');
-        while (useAnalyticsStore.getState().isSyncing) {
-          await new Promise((r) => setTimeout(r, 500));
-          if (cancelled) return;
-        }
-      }
-
-      if (cancelled) return;
-
-      // Load 7-day stats for dashboard
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    // Only sync if not already syncing (prevents race conditions on tab switch)
+    const store = useAnalyticsStore.getState();
+    if (!store.isSyncing) {
+      setSyncing(true);
       try {
-        const [statsData, salesData, allListings] = await Promise.all([
-          analyticsApi.getStats(sevenDaysAgo),
-          analyticsApi.getSales({ limit: 10 }),
-          listingsApi.getAll(),
-        ]);
-        if (!cancelled) {
-          setDashStats(statsData);
-          setRecentSales(salesData);
-          setListings(allListings);
+        const result = await analyticsApi.syncPlatformSales();
+        if (!cancelled.current) {
+          setLastSyncedAt(new Date().toISOString());
+          setLastSynced(new Date());
+          if (result.errors.length > 0) {
+            setSyncError(result.errors.join('; '));
+          }
         }
       } catch (err) {
-        if (!cancelled) console.error('Dashboard load error:', err);
+        if (!cancelled.current) {
+          console.error('Dashboard sync error:', err);
+          setSyncError(err instanceof Error ? err.message : 'Sync failed');
+        }
+      } finally {
+        setSyncing(false);
       }
-    };
+    } else {
+      // Wait for existing sync to finish
+      while (useAnalyticsStore.getState().isSyncing) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (cancelled.current) return;
+      }
+    }
 
-    syncAndLoad();
-    return () => { cancelled = true; };
+    if (cancelled.current) return;
+
+    // Load 7-day stats for dashboard
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    try {
+      const [statsData, salesData, allListings] = await Promise.all([
+        analyticsApi.getStats(sevenDaysAgo),
+        analyticsApi.getSales({ limit: 10 }),
+        listingsApi.getAll(),
+      ]);
+      if (!cancelled.current) {
+        setDashStats(statsData);
+        setRecentSales(salesData);
+        setListings(allListings);
+      }
+    } catch (err) {
+      if (!cancelled.current) console.error('Dashboard load error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const cancelled = { current: false };
+    runSyncAndLoad(cancelled);
+    return () => { cancelled.current = true; };
   }, [isAuthenticated]);
+
+  const handleManualRefresh = async () => {
+    if (isRefreshing || isSyncing) return;
+    setIsRefreshing(true);
+    const cancelled = { current: false };
+    await runSyncAndLoad(cancelled);
+    setIsRefreshing(false);
+  };
 
   const activeListings = listings.filter((l) => l.status === 'active').length;
   const draftListings = listings.filter((l) => l.status === 'draft').length;
@@ -165,41 +174,34 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {syncError && (
-        <div style={{
-          padding: '10px 16px',
-          marginBottom: 16,
-          borderRadius: 8,
-          background: 'rgba(255,59,48,0.1)',
-          border: '1px solid var(--neon-red)',
-          color: 'var(--neon-red)',
-          fontSize: 13,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <span>Sync issue: {syncError}</span>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => navigate('/settings')}
-            style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--neon-cyan)' }}
-          >
-            Settings
-          </button>
-        </div>
-      )}
-
       {/* Recent Sales */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <div className="card-title">Recent Sales</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {isSyncing && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {(isSyncing || isRefreshing) ? (
               <span style={{ fontSize: 12, color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div className="spinner" style={{ width: 14, height: 14 }} />
                 Syncing...
               </span>
-            )}
+            ) : lastSynced ? (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Synced {lastSynced.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            ) : null}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleManualRefresh}
+              disabled={isSyncing || isRefreshing}
+              title="Refresh sales from eBay now"
+              style={{ padding: '4px 8px' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={{ display: 'block', animation: (isSyncing || isRefreshing) ? 'spin 1s linear infinite' : undefined }}>
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+              </svg>
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => navigate('/analytics')}
@@ -209,11 +211,37 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
-        {isSyncing && topSales.length === 0 ? (
+
+        {syncError && (
+          <div style={{
+            margin: '0 0 12px',
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: 'rgba(255,59,48,0.08)',
+            border: '1px solid var(--neon-red)',
+            color: 'var(--neon-red)',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Sync error: {syncError}
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/settings')} style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--neon-cyan)' }}>
+              Settings
+            </button>
+          </div>
+        )}
+
+        {(isSyncing || isRefreshing) && topSales.length === 0 ? (
           <div className="loading-spinner" style={{ padding: 32 }}><div className="spinner" /></div>
         ) : topSales.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-            {isAuthenticated ? 'No sales yet. Connect eBay in Settings to sync your sales.' : 'Sign in to view your sales.'}
+            {isAuthenticated
+              ? syncError
+                ? 'Could not load sales — check the error above and try refreshing.'
+                : 'No sales yet. Connect eBay in Settings to sync your sales.'
+              : 'Sign in to view your sales.'}
           </div>
         ) : (
           <table className="data-table">
