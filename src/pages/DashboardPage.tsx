@@ -142,17 +142,23 @@ export default function DashboardPage() {
     .filter((l) => l.status === 'active')
     .map((l) => {
       const lastSale = lastSaleByListing[l.id];
-      const daysSinceSale = lastSale
-        ? Math.floor((now - lastSale) / 86400000)
-        : null; // null = never sold
-      return { ...l, daysSinceSale };
+      const daysSinceSale = lastSale ? Math.floor((now - lastSale) / 86400000) : null;
+      const daysListed = Math.floor((now - new Date(l.created_at).getTime()) / 86400000);
+      return { ...l, daysSinceSale, daysListed };
     })
+    // Only show listings with no sale in 30+ days, or listed 30+ days with no sales at all
+    .filter((l) => l.daysSinceSale !== null ? l.daysSinceSale >= 30 : l.daysListed >= 30)
     .sort((a, b) => {
-      // Never-sold listings are most stale → sort first
-      if (a.daysSinceSale === null && b.daysSinceSale === null) return 0;
-      if (a.daysSinceSale === null) return -1;
-      if (b.daysSinceSale === null) return 1;
-      return b.daysSinceSale - a.daysSinceSale;
+      // Slow sellers (have sold before, just not recently) come first — most actionable
+      // Never-sold listings go at the end
+      const aHasSales = a.daysSinceSale !== null;
+      const bHasSales = b.daysSinceSale !== null;
+      if (aHasSales && !bHasSales) return -1;
+      if (!aHasSales && bHasSales) return 1;
+      // Within each group, sort by days descending (worst first)
+      const aDays = a.daysSinceSale ?? a.daysListed;
+      const bDays = b.daysSinceSale ?? b.daysListed;
+      return bDays - aDays;
     })
     .slice(0, 50);
 
@@ -499,16 +505,15 @@ export default function DashboardPage() {
             <div>
               {staleListings.length === 0 ? (
                 <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  No active listings yet
+                  No listings 30+ days without a sale
                 </div>
               ) : (
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
                     {staleListings.map((l) => {
                       const neverSold = l.daysSinceSale === null;
-                      const days = l.daysSinceSale ?? Math.floor((now - new Date(l.created_at).getTime()) / 86400000);
-                      const color = neverSold || days >= 60 ? 'var(--neon-red)' : days >= 30 ? '#f5a623' : 'var(--neon-green)';
-                      // Get a platform URL if available
+                      const staleDays = l.daysSinceSale ?? l.daysListed;
+                      const color = staleDays >= 90 ? 'var(--neon-red)' : staleDays >= 60 ? '#f5a623' : 'var(--text-secondary)';
                       const platformUrl = Object.values(l.platforms).find((p) => (p as { url?: string }).url)?.url as string | undefined;
                       const handleClick = () => {
                         if (platformUrl) window.open(platformUrl, '_blank', 'noopener');
@@ -532,26 +537,31 @@ export default function DashboardPage() {
                               <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0 }} />
                             )}
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{l.title}</div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                              <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{l.title}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1, display: 'flex', gap: 5, alignItems: 'center' }}>
+                                {l.price ? <span style={{ color: 'var(--neon-green)', fontWeight: 600 }}>{formatCurrency(l.price)}</span> : null}
                                 {Object.keys(l.platforms).length > 0
-                                  ? Object.keys(l.platforms).map((p) => p).join(', ')
-                                  : 'Not listed anywhere'}
+                                  ? Object.keys(l.platforms).map((p) => (
+                                      <span key={p} className={`platform-badge ${p}`} style={{ fontSize: 9, padding: '1px 5px' }}>{p}</span>
+                                    ))
+                                  : <span>no platform</span>}
                               </div>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color }}>
-                              {neverSold ? 'Never sold' : `${days}d ago`}
+                              {neverSold ? `${l.daysListed}d listed` : `${l.daysSinceSale}d since sale`}
                             </div>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>last sale</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                              {neverSold ? 'never sold' : `listed ${l.daysListed}d`}
+                            </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
                   <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                    <span>Red = 60+ days or never sold · Yellow = 30+</span>
+                    <span>Red = 90+d · Yellow = 60+d · Slow sellers first</span>
                     <button className="btn btn-ghost btn-sm" onClick={() => navigate('/listings')} style={{ fontSize: 11, padding: 0 }}>Manage</button>
                   </div>
                 </>
