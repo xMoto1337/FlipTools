@@ -78,7 +78,7 @@ export default function AnalyticsPage() {
     try {
       const startDate = getDateRangeStart();
       const [salesData, statsData] = await Promise.all([
-        analyticsApi.getSales({ startDate, platform: platformFilter || undefined, limit: 200 }),
+        analyticsApi.getSales({ startDate, platform: platformFilter || undefined }),
         analyticsApi.getStats(startDate),
       ]);
       if (!cancelledRef.current) {

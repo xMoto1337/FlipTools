@@ -313,7 +313,12 @@ export const ebayAdapter: PlatformAdapter = {
     // eBay Fulfillment API hard limit: start date must be within the past 2 years
     // eBay requires dates WITHOUT milliseconds: 2024-01-01T00:00:00Z not 2024-01-01T00:00:00.000Z
     const toEbayDate = (iso: string) => iso.replace(/\.\d{3}Z$/, 'Z');
-    const twoYearsAgo = new Date(Date.now() - 2 * 365 * 24 * 60 * 60 * 1000).toISOString();
+    // Use calendar-year subtraction (not ms) so leap years don't push us outside eBay's hard 2-year limit.
+    // Add 1-day buffer so we never land exactly on the boundary.
+    const _twoYearsAgo = new Date();
+    _twoYearsAgo.setFullYear(_twoYearsAgo.getFullYear() - 2);
+    _twoYearsAgo.setDate(_twoYearsAgo.getDate() + 1);
+    const twoYearsAgo = _twoYearsAgo.toISOString();
     const startDate = params.startDate
       ? (new Date(params.startDate) < new Date(twoYearsAgo) ? twoYearsAgo : params.startDate)
       : twoYearsAgo;
@@ -436,8 +441,8 @@ export const ebayAdapter: PlatformAdapter = {
     try {
       let labelOffset = 0;
       while (true) {
-        const dateFilter = params.startDate
-          ? `,transactionDate:[${new Date(params.startDate).toISOString()}..${new Date().toISOString()}]`
+        const dateFilter = startDate
+          ? `,transactionDate:[${toEbayDate(new Date(startDate).toISOString())}..${toEbayDate(new Date().toISOString())}]`
           : '';
         const labelParams = new URLSearchParams({
           limit: '200',
