@@ -62,6 +62,11 @@ export default function ListingsPage() {
     quantity: 1,
     category: '',
     condition: 'good',
+    brand: '',
+    size: '',
+    color: '',
+    shipping_weight: undefined,
+    condition_notes: '',
     images: [],
     tags: [],
   });
@@ -134,7 +139,7 @@ export default function ListingsPage() {
       const listing = await listingsApi.create(editorData);
       addListing(listing);
       setShowEditor(false);
-      setEditorData({ title: '', description: '', price: 0, cost: 0, quantity: 1, category: '', condition: 'good', images: [], tags: [] });
+      setEditorData({ title: '', description: '', price: 0, cost: 0, quantity: 1, category: '', condition: 'good', brand: '', size: '', color: '', shipping_weight: undefined, condition_notes: '', images: [], tags: [] });
     } catch (err) {
       console.error('Failed to create listing:', err);
     }
@@ -874,6 +879,34 @@ export default function ListingsPage() {
                     <option value="good">Good</option>
                     <option value="acceptable">Acceptable</option>
                   </select>
+                </div>
+              </div>
+              {/* Cross-platform fields */}
+              <div style={{ margin: '4px 0 8px', fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
+                Platform Details
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Brand <span style={{ color: 'var(--neon-orange)', fontSize: 10 }}>Poshmark/Mercari</span></label>
+                  <input className="form-input" value={editorData.brand || ''} onChange={(e) => setEditorData({ ...editorData, brand: e.target.value })} placeholder="e.g. Nike" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Size <span style={{ color: 'var(--neon-orange)', fontSize: 10 }}>Poshmark</span></label>
+                  <input className="form-input" value={editorData.size || ''} onChange={(e) => setEditorData({ ...editorData, size: e.target.value })} placeholder="e.g. M, 32x30, 10.5" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Color <span style={{ color: 'var(--neon-orange)', fontSize: 10 }}>Poshmark</span></label>
+                  <input className="form-input" value={editorData.color || ''} onChange={(e) => setEditorData({ ...editorData, color: e.target.value })} placeholder="e.g. Black" />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Ship Weight (oz) <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>eBay/Mercari</span></label>
+                  <input type="number" className="form-input" value={editorData.shipping_weight ?? ''} onChange={(e) => setEditorData({ ...editorData, shipping_weight: e.target.value ? Number(e.target.value) : undefined })} placeholder="e.g. 16" min="0" step="0.1" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Condition Notes <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>All platforms</span></label>
+                  <input className="form-input" value={editorData.condition_notes || ''} onChange={(e) => setEditorData({ ...editorData, condition_notes: e.target.value })} placeholder="e.g. Small scuff on left sole, otherwise great" />
                 </div>
               </div>
             </div>

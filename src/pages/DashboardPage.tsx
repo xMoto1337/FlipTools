@@ -19,6 +19,7 @@ export default function DashboardPage() {
   const [syncError, setSyncError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [insightTab, setInsightTab] = useState<'stale' | 'flips' | 'monthly' | 'velocity'>('stale');
   const mountedRef = useRef(true);
 
   // Dashboard-local state for 7-day window
@@ -119,6 +120,44 @@ export default function DashboardPage() {
     return acc;
   }, {});
   const platformEntries = Object.entries(platformBreakdown).sort((a, b) => b[1].revenue - a[1].revenue);
+
+  // Stale Listings: active listings sorted by age (oldest first)
+  const now = Date.now();
+  const staleListings = listings
+    .filter((l) => l.status === 'active' && l.created_at)
+    .map((l) => ({ ...l, daysListed: Math.floor((now - new Date(l.created_at).getTime()) / 86400000) }))
+    .sort((a, b) => b.daysListed - a.daysListed)
+    .slice(0, 6);
+
+  // Best Flips: top 5 sales by profit
+  const bestFlips = [...recentSales].sort((a, b) => b.profit - a.profit).slice(0, 5);
+
+  // Monthly Snapshot: this month vs last month
+  const startOfThisMonth = new Date(); startOfThisMonth.setDate(1); startOfThisMonth.setHours(0, 0, 0, 0);
+  const startOfLastMonth = new Date(startOfThisMonth); startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1);
+  const thisMonthSales = recentSales.filter((s) => new Date(s.sold_at) >= startOfThisMonth);
+  const lastMonthSales = recentSales.filter((s) => new Date(s.sold_at) >= startOfLastMonth && new Date(s.sold_at) < startOfThisMonth);
+  const monthlySnap = {
+    thisRevenue: thisMonthSales.reduce((s, x) => s + x.sale_price, 0),
+    lastRevenue: lastMonthSales.reduce((s, x) => s + x.sale_price, 0),
+    thisProfit: thisMonthSales.reduce((s, x) => s + x.profit, 0),
+    lastProfit: lastMonthSales.reduce((s, x) => s + x.profit, 0),
+    thisCount: thisMonthSales.length,
+    lastCount: lastMonthSales.length,
+  };
+
+  // Sales Velocity: avg sales/week over 4 weeks, week-by-week breakdown
+  const weekMs = 7 * 86400000;
+  const velocityWeeks = [0, 1, 2, 3].map((i) => {
+    const end = new Date(now - i * weekMs);
+    const start = new Date(now - (i + 1) * weekMs);
+    return recentSales.filter((s) => { const d = new Date(s.sold_at); return d >= start && d < end; }).length;
+  }).reverse(); // oldest to newest
+  const avgPerWeek = velocityWeeks.reduce((a, b) => a + b, 0) / 4;
+  const thisWeekSales = velocityWeeks[3];
+  const lastWeekSales = velocityWeeks[2];
+  const velocityTrend = thisWeekSales - lastWeekSales;
+  const maxWeekSales = Math.max(...velocityWeeks, 1);
 
   return (
     <div>
@@ -344,36 +383,165 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Listing Health */}
+        {/* Insights — tabbed: Stale / Best Flips / Monthly / Velocity */}
         <div className="card">
-          <div className="card-header">
-            <div className="card-title">Listing Health</div>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/listings')} style={{ fontSize: 12 }}>
-              Manage
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {[
-              { label: 'Active', count: activeListings, color: 'var(--neon-green)', total: listings.length },
-              { label: 'Sold', count: soldListings, color: 'var(--neon-cyan)', total: listings.length },
-              { label: 'Draft', count: listings.filter((l) => l.status === 'draft').length, color: 'var(--text-muted)', total: listings.length },
-              { label: 'Ended', count: listings.filter((l) => l.status === 'ended').length, color: 'var(--neon-red)', total: listings.length },
-            ].map(({ label, count, color, total }) => (
-              <div key={label}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color }}>{count}</span>
-                </div>
-                <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: total > 0 ? `${Math.round((count / total) * 100)}%` : '0%', borderRadius: 2, background: color, transition: 'width 0.4s ease' }} />
-                </div>
-              </div>
-            ))}
-            <div style={{ paddingTop: 4, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
-              <span>Total listings</span>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{listings.length}</span>
+          <div className="card-header" style={{ flexDirection: 'column', gap: 10, alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {([
+                { id: 'stale', label: 'Stale' },
+                { id: 'flips', label: 'Best Flips' },
+                { id: 'monthly', label: 'Monthly' },
+                { id: 'velocity', label: 'Velocity' },
+              ] as const).map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setInsightTab(id)}
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: 6,
+                    border: '1px solid',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    background: insightTab === id ? 'var(--neon-cyan)' : 'transparent',
+                    borderColor: insightTab === id ? 'var(--neon-cyan)' : 'var(--border)',
+                    color: insightTab === id ? '#000' : 'var(--text-secondary)',
+                    fontWeight: insightTab === id ? 600 : 400,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
+
+          {/* Stale Listings */}
+          {insightTab === 'stale' && (
+            <div>
+              {staleListings.length === 0 ? (
+                <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  No active listings yet
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {staleListings.map((l) => {
+                    const color = l.daysListed >= 60 ? 'var(--neon-red)' : l.daysListed >= 30 ? '#f5a623' : 'var(--neon-green)';
+                    return (
+                      <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '72%' }}>{l.title}</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0 }}>{l.daysListed}d</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                    <span>Red = 60+ days · Yellow = 30+ days</span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => navigate('/listings')} style={{ fontSize: 11, padding: 0 }}>Manage</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Best Flips */}
+          {insightTab === 'flips' && (
+            <div>
+              {bestFlips.length === 0 ? (
+                <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No sales data yet</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                  {bestFlips.map((sale, i) => (
+                    <div key={sale.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 14, flexShrink: 0 }}>{i + 1}.</span>
+                      {sale.item_image_url && (
+                        <img src={sale.item_image_url} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                      )}
+                      <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {sale.item_title || sale.listing?.title || 'Unknown'}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: sale.profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)', flexShrink: 0 }}>
+                        {sale.profit >= 0 ? '+' : ''}{formatCurrency(sale.profit)}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
+                    Top 5 by profit · past 2Y
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Monthly Snapshot */}
+          {insightTab === 'monthly' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {([
+                { label: 'Revenue', thisVal: monthlySnap.thisRevenue, lastVal: monthlySnap.lastRevenue, fmt: formatCurrency },
+                { label: 'Profit', thisVal: monthlySnap.thisProfit, lastVal: monthlySnap.lastProfit, fmt: formatCurrency },
+                { label: 'Items Sold', thisVal: monthlySnap.thisCount, lastVal: monthlySnap.lastCount, fmt: (v: number) => String(v) },
+              ] as const).map(({ label, thisVal, lastVal, fmt }) => {
+                const diff = thisVal - lastVal;
+                const pct = lastVal > 0 ? Math.round((diff / lastVal) * 100) : 0;
+                const up = diff >= 0;
+                return (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>{fmt(thisVal)}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 11, color: up ? 'var(--neon-green)' : 'var(--neon-red)', fontWeight: 600 }}>
+                        {up ? '▲' : '▼'} {Math.abs(pct)}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>vs {fmt(lastVal)} last mo</div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ paddingTop: 4, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
+                {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })} vs prior month
+              </div>
+            </div>
+          )}
+
+          {/* Sales Velocity */}
+          {insightTab === 'velocity' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 700 }}>{avgPerWeek.toFixed(1)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>avg sales / week</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: velocityTrend >= 0 ? 'var(--neon-green)' : 'var(--neon-red)' }}>
+                    {velocityTrend >= 0 ? '▲' : '▼'} {Math.abs(velocityTrend)} this week
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{thisWeekSales} vs {lastWeekSales} last week</div>
+                </div>
+              </div>
+              {/* Mini bar chart — 4 weeks */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 48 }}>
+                  {velocityWeeks.map((count, i) => (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                      <div style={{
+                        width: '100%',
+                        height: `${Math.round((count / maxWeekSales) * 40) + 4}px`,
+                        borderRadius: '3px 3px 0 0',
+                        background: i === 3 ? 'var(--neon-cyan)' : 'var(--bg-tertiary)',
+                        border: i === 3 ? '1px solid var(--neon-cyan)' : '1px solid var(--border)',
+                        minHeight: 4,
+                        transition: 'height 0.3s ease',
+                      }} />
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{count}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                  <span>4W ago</span><span>3W</span><span>2W</span><span style={{ color: 'var(--neon-cyan)' }}>This W</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

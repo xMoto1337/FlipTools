@@ -13,6 +13,11 @@ export interface Listing {
   quantity: number | null;
   category: string | null;
   condition: string | null;
+  brand: string | null;
+  size: string | null;
+  color: string | null;
+  shipping_weight: number | null;
+  condition_notes: string | null;
   images: string[];
   status: 'draft' | 'active' | 'sold' | 'ended' | 'error';
   platforms: Record<string, { id: string; url: string; status: string }>;
@@ -29,6 +34,11 @@ export interface ListingInput {
   quantity?: number;
   category?: string;
   condition?: string;
+  brand?: string;
+  size?: string;
+  color?: string;
+  shipping_weight?: number;
+  condition_notes?: string;
   images?: string[];
   tags?: string[];
   status?: Listing['status'];

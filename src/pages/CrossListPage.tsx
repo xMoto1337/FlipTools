@@ -4,10 +4,66 @@ import { usePlatformStore } from '../stores/platformStore';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { getPlatform, getAllPlatforms } from '../api/platforms';
 import type { PlatformId } from '../api/platforms';
+import type { Listing } from '../api/listings';
 import { useFeatureGate } from '../hooks/useSubscription';
 import { PaywallGate } from '../components/Subscription/PaywallGate';
 import { formatCurrency } from '../utils/formatters';
 import { supabase } from '../api/supabase';
+
+interface ValidationResult {
+  errors: string[];   // blocking — must fix before posting
+  warnings: string[]; // non-blocking — recommended but not required
+}
+
+function validateListingForPlatform(listing: Listing, platformId: string): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Universal requirements
+  if (!listing.title || listing.title.trim().length < 3) errors.push('Title must be at least 3 characters');
+  if (!listing.price || listing.price <= 0) errors.push('Price must be greater than $0');
+  if (!listing.description || listing.description.trim().length < 10) warnings.push('Description is very short');
+
+  switch (platformId) {
+    case 'ebay':
+      if (!listing.condition) warnings.push('Condition recommended');
+      if (listing.images.length === 0) warnings.push('At least 1 image recommended');
+      break;
+
+    case 'poshmark':
+      if (!listing.brand) errors.push('Brand is required');
+      if (!listing.size) errors.push('Size is required');
+      if (!listing.color) warnings.push('Color recommended');
+      if (listing.images.length === 0) errors.push('At least 1 image required');
+      if (!listing.condition) warnings.push('Condition recommended');
+      break;
+
+    case 'mercari':
+      if (!listing.condition) errors.push('Condition is required');
+      if (listing.images.length === 0) errors.push('At least 1 image required');
+      if (!listing.brand) warnings.push('Brand recommended');
+      if (!listing.shipping_weight) warnings.push('Shipping weight recommended for calculated shipping');
+      break;
+
+    case 'depop':
+      if (!listing.condition) warnings.push('Condition recommended');
+      if (listing.images.length === 0) errors.push('At least 1 image required');
+      if (!listing.size) warnings.push('Size recommended for clothing');
+      break;
+
+    case 'etsy':
+      if (listing.images.length === 0) errors.push('At least 1 image required');
+      if (!listing.tags || listing.tags.length === 0) warnings.push('Tags help with Etsy search visibility');
+      break;
+
+    case 'facebook':
+      if (listing.images.length === 0) warnings.push('Images strongly recommended');
+      if (!listing.condition) warnings.push('Condition recommended');
+      break;
+  }
+
+  return { errors, warnings };
+}
 
 const PLATFORM_COLORS: Record<string, string> = {
   ebay: '#e53238',
@@ -28,6 +84,25 @@ export default function CrossListPage() {
 
   const { allowed: crossListAllowed } = useFeatureGate('cross-list');
   const platforms = getAllPlatforms();
+
+  // Pre-flight validation: compute errors/warnings for each selected listing × target platform
+  const validationMap = useMemo(() => {
+    const map: Record<string, ValidationResult> = {};
+    for (const id of selectedListings) {
+      const listing = listings.find((l) => l.id === id);
+      if (!listing) continue;
+      for (const platformId of targetPlatforms) {
+        if (listing.platforms[platformId]) continue; // already listed — skip
+        map[`${id}-${platformId}`] = validateListingForPlatform(listing, platformId);
+      }
+    }
+    return map;
+  }, [selectedListings, targetPlatforms, listings]);
+
+  const hasBlockingErrors = useMemo(
+    () => Object.values(validationMap).some((v) => v.errors.length > 0),
+    [validationMap]
+  );
 
   const eligibleListings = useMemo(() => {
     let filtered = listings.filter((l) => l.status === 'active' || l.status === 'draft');
@@ -445,6 +520,7 @@ export default function CrossListPage() {
                           const fees = adapter.calculateFees(listing.price || 0);
                           const status = crossListStatus[`${id}-${p}`];
                           const color = PLATFORM_COLORS[p] || '#888';
+                          const validation = validationMap[`${id}-${p}`];
                           return (
                             <div key={p} style={{
                               fontSize: 11,
@@ -452,8 +528,10 @@ export default function CrossListPage() {
                               borderRadius: 5,
                               background: alreadyListed
                                 ? 'color-mix(in srgb, var(--text-muted) 10%, transparent)'
-                                : `color-mix(in srgb, ${color} 10%, transparent)`,
-                              border: `1px solid ${alreadyListed ? 'var(--border)' : color + '33'}`,
+                                : validation?.errors.length
+                                  ? 'color-mix(in srgb, var(--neon-red) 8%, transparent)'
+                                  : `color-mix(in srgb, ${color} 10%, transparent)`,
+                              border: `1px solid ${alreadyListed ? 'var(--border)' : validation?.errors.length ? 'var(--neon-red)' : color + '33'}`,
                             }}>
                               <span style={{ fontWeight: 600, color: alreadyListed ? 'var(--text-muted)' : color, textTransform: 'uppercase' }}>
                                 {p}
@@ -480,6 +558,34 @@ export default function CrossListPage() {
                           );
                         })}
                       </div>
+                      {/* Per-listing validation issues */}
+                      {(() => {
+                        const allErrors: string[] = [];
+                        const allWarnings: string[] = [];
+                        for (const p of targetPlatforms) {
+                          const v = validationMap[`${id}-${p}`];
+                          if (!v) continue;
+                          v.errors.forEach((e) => allErrors.push(`[${p}] ${e}`));
+                          v.warnings.forEach((w) => allWarnings.push(`[${p}] ${w}`));
+                        }
+                        if (allErrors.length === 0 && allWarnings.length === 0) return null;
+                        return (
+                          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {allErrors.map((e) => (
+                              <div key={e} style={{ fontSize: 11, color: 'var(--neon-red)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                {e}
+                              </div>
+                            ))}
+                            {allWarnings.map((w) => (
+                              <div key={w} style={{ fontSize: 11, color: 'var(--neon-orange)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                {w}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
@@ -513,6 +619,24 @@ export default function CrossListPage() {
           </p>
         )}
 
+        {hasBlockingErrors && selectedListings.size > 0 && targetPlatforms.size > 0 && (
+          <div style={{
+            marginBottom: 12,
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: 'color-mix(in srgb, var(--neon-red) 8%, transparent)',
+            border: '1px solid var(--neon-red)',
+            color: 'var(--neon-red)',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Fix the errors above before cross-listing. Missing required fields (brand, size, price, etc.) must be filled in on the listing first.
+          </div>
+        )}
+
         {!crossListAllowed ? (
           <PaywallGate feature="Unlimited cross-listing">
             <button className="btn btn-primary btn-lg" disabled>Cross List Now</button>
@@ -521,7 +645,7 @@ export default function CrossListPage() {
           <button
             className="btn btn-primary btn-lg"
             onClick={requireAuth(handleCrossList, 'Sign in to cross-list items')}
-            disabled={selectedListings.size === 0 || targetPlatforms.size === 0 || isCrossListing}
+            disabled={selectedListings.size === 0 || targetPlatforms.size === 0 || isCrossListing || hasBlockingErrors}
             style={{ width: '100%' }}
           >
             {isCrossListing ? (
