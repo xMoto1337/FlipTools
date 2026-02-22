@@ -61,6 +61,10 @@ export default function EbayCallbackPage() {
           platformUsername: 'eBay Account',
           connectedAt: new Date().toISOString(),
         });
+
+        // Clear sync cache so the next visit to Listings forces a fresh sync
+        localStorage.removeItem('fliptools_listings_last_sync');
+
         setStatus('success');
 
         // Purge old sales in the background (don't block or await)

@@ -201,21 +201,23 @@ export const listingsApi = {
         console.log(`[sync] ${platformId}: fetched ${platformListings.length} listings`);
         totalFetched += platformListings.length;
 
-        if (platformListings.length === 0) continue;
-
         // Get existing listings that have this platform's external ID
         // The platforms JSONB column stores: { "ebay": { "id": "123", ... } }
         const { data: existing } = await supabase
           .from('listings')
-          .select('id, platforms')
+          .select('id, platforms, status')
           .eq('user_id', user.id);
 
         // Build a set of existing external IDs for this platform
-        const existingByExternalId = new Map<string, string>();
+        const existingByExternalId = new Map<string, string>(); // externalId → dbId (all statuses)
+        const activeByExternalId = new Map<string, string>();   // externalId → dbId (active only)
         for (const row of existing || []) {
           const platData = (row.platforms as Record<string, { id: string }>)?.[platformId];
           if (platData?.id) {
             existingByExternalId.set(platData.id, row.id);
+            if ((row as { status: string }).status === 'active') {
+              activeByExternalId.set(platData.id, row.id);
+            }
           }
         }
 
@@ -303,7 +305,31 @@ export const listingsApi = {
           }
         }
 
-        if (newListings.length === 0 && updatedListings.length === 0) {
+        // Detect sold items: active DB listings that are no longer in platform's active list
+        // eBay (and other platforms) remove sold items from active listings immediately.
+        // So any listing that WAS active in our DB but is NOT in the fetched active list has sold.
+        const fetchedExternalIds = new Set(platformListings.map((l) => l.externalId).filter(Boolean));
+        const soldDbIds: string[] = [];
+        for (const [externalId, dbId] of activeByExternalId) {
+          if (!fetchedExternalIds.has(externalId)) {
+            soldDbIds.push(dbId);
+          }
+        }
+
+        if (soldDbIds.length > 0) {
+          console.log(`[sync] ${platformId}: ${soldDbIds.length} listing(s) no longer active → marking as sold`);
+          const { error: soldErr } = await supabase
+            .from('listings')
+            .update({ status: 'sold', updated_at: new Date().toISOString() })
+            .in('id', soldDbIds);
+          if (soldErr) {
+            console.error(`[sync] Failed to mark sold listings:`, soldErr);
+          } else {
+            totalSynced += soldDbIds.length;
+          }
+        }
+
+        if (newListings.length === 0 && updatedListings.length === 0 && soldDbIds.length === 0) {
           console.log(`[sync] ${platformId}: no listings to sync`);
         }
       } catch (err) {
