@@ -282,6 +282,7 @@ export const ebayAdapter: PlatformAdapter = {
           status: 'active',
           title: item.title || '',
           price: item.currentPrice || 0,
+          quantity: item.quantityAvailable || item.quantity || 1,
           images,
           condition: item.conditionDisplayName || '',
           createdAt: item.startTime || undefined,

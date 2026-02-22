@@ -58,6 +58,8 @@ export default function ListingsPage() {
     title: '',
     description: '',
     price: 0,
+    cost: 0,
+    quantity: 1,
     category: '',
     condition: 'good',
     images: [],
@@ -72,9 +74,9 @@ export default function ListingsPage() {
   const statusMenuRef = useRef<HTMLDivElement>(null);
 
   // Bulk edit state
-  const [editFields, setEditFields] = useState<Record<string, boolean>>({ price: false, cost: false, category: false, condition: false });
+  const [editFields, setEditFields] = useState<Record<string, boolean>>({ price: false, cost: false, quantity: false, category: false, condition: false });
   const [priceMode, setPriceMode] = useState<'set' | 'increase' | 'decrease' | 'percent_up' | 'percent_down'>('set');
-  const [editValues, setEditValues] = useState<{ price: number; cost: number; category: string; condition: string }>({ price: 0, cost: 0, category: '', condition: 'good' });
+  const [editValues, setEditValues] = useState<{ price: number; cost: number; quantity: number; category: string; condition: string }>({ price: 0, cost: 0, quantity: 1, category: '', condition: 'good' });
   const [bulkEditBusy, setBulkEditBusy] = useState(false);
 
   // Bulk cross-list state
@@ -132,7 +134,7 @@ export default function ListingsPage() {
       const listing = await listingsApi.create(editorData);
       addListing(listing);
       setShowEditor(false);
-      setEditorData({ title: '', description: '', price: 0, category: '', condition: 'good', images: [], tags: [] });
+      setEditorData({ title: '', description: '', price: 0, cost: 0, quantity: 1, category: '', condition: 'good', images: [], tags: [] });
     } catch (err) {
       console.error('Failed to create listing:', err);
     }
@@ -171,6 +173,7 @@ export default function ListingsPage() {
         const updates: Partial<ListingInput> = {};
         if (editFields.price) updates.price = editValues.price;
         if (editFields.cost) updates.cost = editValues.cost;
+        if (editFields.quantity) updates.quantity = editValues.quantity;
         if (editFields.category) updates.category = editValues.category;
         if (editFields.condition) updates.condition = editValues.condition;
 
@@ -196,6 +199,7 @@ export default function ListingsPage() {
 
           const updates: Partial<ListingInput> = { price: newPrice };
           if (editFields.cost) updates.cost = editValues.cost;
+          if (editFields.quantity) updates.quantity = editValues.quantity;
           if (editFields.category) updates.category = editValues.category;
           if (editFields.condition) updates.condition = editValues.condition;
 
@@ -333,9 +337,9 @@ export default function ListingsPage() {
   };
 
   const openBulkEdit = () => {
-    setEditFields({ price: false, cost: false, category: false, condition: false });
+    setEditFields({ price: false, cost: false, quantity: false, category: false, condition: false });
     setPriceMode('set');
-    setEditValues({ price: 0, cost: 0, category: '', condition: 'good' });
+    setEditValues({ price: 0, cost: 0, quantity: 1, category: '', condition: 'good' });
     setShowBulkEdit(true);
   };
 
@@ -607,6 +611,14 @@ export default function ListingsPage() {
                       ))}
                     </div>
                   )}
+                  {(listing.quantity ?? 1) > 1 && (
+                    <div style={{
+                      position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+                      borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: 'var(--neon-cyan)',
+                    }}>
+                      ×{listing.quantity}
+                    </div>
+                  )}
                 </div>
                 <div className="listing-body">
                   <div className="listing-title">{listing.title}</div>
@@ -620,6 +632,9 @@ export default function ListingsPage() {
                   </div>
                   {listing.cost != null && listing.cost > 0 && (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Cost: {formatCurrency(listing.cost)}</div>
+                  )}
+                  {(listing.quantity ?? 1) > 1 && (
+                    <div style={{ fontSize: 11, color: 'var(--neon-cyan)', marginBottom: 4, fontWeight: 600 }}>Qty: {listing.quantity}</div>
                   )}
                   <div className="listing-meta">
                     <span className={`status-badge ${listing.status}`}>
@@ -657,6 +672,7 @@ export default function ListingsPage() {
                 </th>
                 <th>Cost</th>
                 <th>Profit</th>
+                <th>Qty</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => handleSort('status')}>
                   Status <SortIcon field="status" />
                 </th>
@@ -698,6 +714,9 @@ export default function ListingsPage() {
                     <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{hasCost ? formatCurrency(listing.cost!) : '—'}</td>
                     <td style={{ fontWeight: 600, color: hasCost ? (profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)') : 'var(--text-muted)', fontSize: 13 }}>
                       {hasCost ? `${profit >= 0 ? '+' : ''}${formatCurrency(profit)}` : '—'}
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                      {(listing.quantity ?? 1) > 1 ? <span style={{ color: 'var(--neon-cyan)', fontWeight: 600 }}>×{listing.quantity}</span> : '1'}
                     </td>
                     <td><span className={`status-badge ${listing.status}`}><span className="status-dot" />{listing.status}</span></td>
                     <td>
@@ -818,14 +837,18 @@ export default function ListingsPage() {
                 <label className="form-label">Description</label>
                 <textarea className="form-input form-textarea" value={editorData.description} onChange={(e) => setEditorData({ ...editorData, description: e.target.value })} placeholder="Item description" />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">Price ($)</label>
-                  <input type="number" className="form-input" value={editorData.price || ''} onChange={(e) => setEditorData({ ...editorData, price: Number(e.target.value) })} placeholder="0.00" />
+                  <input type="number" className="form-input" value={editorData.price || ''} onChange={(e) => setEditorData({ ...editorData, price: Number(e.target.value) })} placeholder="0.00" min="0" step="0.01" />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Cost ($)</label>
-                  <input type="number" className="form-input" value={editorData.cost || ''} onChange={(e) => setEditorData({ ...editorData, cost: Number(e.target.value) })} placeholder="0.00" />
+                  <input type="number" className="form-input" value={editorData.cost || ''} onChange={(e) => setEditorData({ ...editorData, cost: Number(e.target.value) })} placeholder="0.00" min="0" step="0.01" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Quantity</label>
+                  <input type="number" className="form-input" value={editorData.quantity ?? 1} onChange={(e) => setEditorData({ ...editorData, quantity: Math.max(1, Number(e.target.value)) })} placeholder="1" min="1" step="1" />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -951,6 +974,25 @@ export default function ListingsPage() {
                       placeholder="0.00"
                       min={0}
                       step={0.01}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Quantity */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16, padding: 12, borderRadius: 8, background: editFields.quantity ? 'var(--bg-hover)' : 'transparent' }}>
+                <input type="checkbox" className="table-checkbox" checked={editFields.quantity} onChange={() => setEditFields({ ...editFields, quantity: !editFields.quantity })} style={{ marginTop: 4 }} />
+                <div style={{ flex: 1 }}>
+                  <label className="form-label" style={{ marginBottom: 8 }}>Quantity</label>
+                  {editFields.quantity && (
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={editValues.quantity ?? 1}
+                      onChange={(e) => setEditValues({ ...editValues, quantity: Math.max(1, Number(e.target.value)) })}
+                      placeholder="1"
+                      min={1}
+                      step={1}
                     />
                   )}
                 </div>

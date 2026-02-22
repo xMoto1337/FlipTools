@@ -54,7 +54,9 @@ export default function AnalyticsPage() {
       } else {
         setSyncing(true);
         try {
-          const result = await analyticsApi.syncPlatformSales(getDateRangeStart());
+          // Always sync ALL historical sales regardless of the display filter.
+          // The display date filter is applied when loading from Supabase below.
+          const result = await analyticsApi.syncPlatformSales();
           if (!cancelledRef.current) {
             setLastSyncedAt(new Date().toISOString());
           }

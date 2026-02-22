@@ -10,6 +10,7 @@ export interface Listing {
   description: string | null;
   price: number | null;
   cost: number | null;
+  quantity: number | null;
   category: string | null;
   condition: string | null;
   images: string[];
@@ -25,6 +26,7 @@ export interface ListingInput {
   description?: string;
   price?: number;
   cost?: number;
+  quantity?: number;
   category?: string;
   condition?: string;
   images?: string[];
@@ -243,6 +245,7 @@ export const listingsApi = {
               dbId: existingId,
               status: item.status === 'active' ? 'active' as const : item.status === 'sold' ? 'sold' as const : 'ended' as const,
               price: item.price || undefined,
+              quantity: item.quantity ?? undefined,
               images: item.images?.length ? item.images : undefined,
               platforms: platformInfo,
               createdAt: item.createdAt,
@@ -255,6 +258,7 @@ export const listingsApi = {
               title: item.title || 'Untitled',
               description: item.description || null,
               price: item.price || null,
+              quantity: item.quantity ?? 1,
               category: item.category || null,
               condition: item.condition || null,
               images: item.images || [],
@@ -289,6 +293,7 @@ export const listingsApi = {
             updated_at: new Date().toISOString(),
           };
           if (item.price !== undefined) updates.price = item.price;
+          if (item.quantity !== undefined) updates.quantity = item.quantity;
           if (item.images !== undefined) updates.images = item.images;
           if (item.createdAt) updates.created_at = item.createdAt;
           if (item.condition) updates.condition = item.condition;

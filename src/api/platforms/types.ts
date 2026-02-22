@@ -23,6 +23,7 @@ export interface PlatformListing {
   title?: string;
   description?: string;
   price?: number;
+  quantity?: number;
   images?: string[];
   condition?: string;
   category?: string;
