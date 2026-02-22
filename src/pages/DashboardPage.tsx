@@ -19,7 +19,7 @@ export default function DashboardPage() {
   const [syncError, setSyncError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [insightTab, setInsightTab] = useState<'stale' | 'flips' | 'monthly' | 'velocity'>('stale');
+  const [insightTab, setInsightTab] = useState<'flips' | 'stale' | 'monthly' | 'velocity'>('flips');
   const mountedRef = useRef(true);
 
   // Dashboard-local state for 7-day window
@@ -121,16 +121,36 @@ export default function DashboardPage() {
   }, {});
   const platformEntries = Object.entries(platformBreakdown).sort((a, b) => b[1].revenue - a[1].revenue);
 
-  // Stale Listings: active listings sorted by age (oldest first)
   const now = Date.now();
-  const staleListings = listings
-    .filter((l) => l.status === 'active' && l.created_at)
-    .map((l) => ({ ...l, daysListed: Math.floor((now - new Date(l.created_at).getTime()) / 86400000) }))
-    .sort((a, b) => b.daysListed - a.daysListed)
-    .slice(0, 6);
 
-  // Best Flips: top 5 sales by profit
-  const bestFlips = [...recentSales].sort((a, b) => b.profit - a.profit).slice(0, 5);
+  // Stale Listings: active listings sorted by time since their last sale
+  // Build a map of listingId → most recent sale date
+  const lastSaleByListing = recentSales.reduce<Record<string, number>>((acc, sale) => {
+    if (sale.listing_id) {
+      const t = new Date(sale.sold_at).getTime();
+      if (!acc[sale.listing_id] || t > acc[sale.listing_id]) acc[sale.listing_id] = t;
+    }
+    return acc;
+  }, {});
+  const staleListings = listings
+    .filter((l) => l.status === 'active')
+    .map((l) => {
+      const lastSale = lastSaleByListing[l.id];
+      const daysSinceSale = lastSale
+        ? Math.floor((now - lastSale) / 86400000)
+        : null; // null = never sold
+      return { ...l, daysSinceSale };
+    })
+    .sort((a, b) => {
+      // Never-sold listings are most stale → sort first
+      if (a.daysSinceSale === null && b.daysSinceSale === null) return 0;
+      if (a.daysSinceSale === null) return -1;
+      if (b.daysSinceSale === null) return 1;
+      return b.daysSinceSale - a.daysSinceSale;
+    });
+
+  // Best Flips: all sales sorted by profit descending (no cap — scrollable)
+  const bestFlips = [...recentSales].sort((a, b) => b.profit - a.profit);
 
   // Monthly Snapshot: this month vs last month
   const startOfThisMonth = new Date(); startOfThisMonth.setDate(1); startOfThisMonth.setHours(0, 0, 0, 0);
@@ -383,13 +403,13 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Insights — tabbed: Stale / Best Flips / Monthly / Velocity */}
+        {/* Insights — tabbed: Best Flips / Stale / Monthly / Velocity */}
         <div className="card">
           <div className="card-header" style={{ flexDirection: 'column', gap: 10, alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {([
-                { id: 'stale', label: 'Stale' },
                 { id: 'flips', label: 'Best Flips' },
+                { id: 'stale', label: 'Stale' },
                 { id: 'monthly', label: 'Monthly' },
                 { id: 'velocity', label: 'Velocity' },
               ] as const).map(({ id, label }) => (
@@ -415,6 +435,58 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Best Flips */}
+          {insightTab === 'flips' && (
+            <div>
+              {bestFlips.length === 0 ? (
+                <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No sales data yet</div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
+                    {bestFlips.map((sale, i) => (
+                      <div
+                        key={sale.id}
+                        onClick={() => navigate('/analytics')}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '6px 8px', borderRadius: 8, cursor: 'pointer',
+                          transition: 'background 0.12s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 18, flexShrink: 0, textAlign: 'right' }}>{i + 1}.</span>
+                        {sale.item_image_url ? (
+                          <img src={sale.item_image_url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                        ) : (
+                          <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                          </div>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {sale.item_title || sale.listing?.title || 'Unknown'}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 6, marginTop: 1 }}>
+                            <span className={`platform-badge ${sale.platform}`} style={{ fontSize: 9, padding: '1px 5px' }}>{sale.platform}</span>
+                            <span>{formatCurrency(sale.sale_price)}</span>
+                            <span>{formatDate(sale.sold_at)}</span>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: sale.profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)', flexShrink: 0 }}>
+                          {sale.profit >= 0 ? '+' : ''}{formatCurrency(sale.profit)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                    {bestFlips.length} sales by profit · past 2Y · click to view in Analytics
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Stale Listings */}
           {insightTab === 'stale' && (
             <div>
@@ -423,50 +495,59 @@ export default function DashboardPage() {
                   No active listings yet
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {staleListings.map((l) => {
-                    const color = l.daysListed >= 60 ? 'var(--neon-red)' : l.daysListed >= 30 ? '#f5a623' : 'var(--neon-green)';
-                    return (
-                      <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '72%' }}>{l.title}</span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0 }}>{l.daysListed}d</span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
-                    <span>Red = 60+ days · Yellow = 30+ days</span>
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
+                    {staleListings.map((l) => {
+                      const neverSold = l.daysSinceSale === null;
+                      const days = l.daysSinceSale ?? Math.floor((now - new Date(l.created_at).getTime()) / 86400000);
+                      const color = neverSold || days >= 60 ? 'var(--neon-red)' : days >= 30 ? '#f5a623' : 'var(--neon-green)';
+                      // Get a platform URL if available
+                      const platformUrl = Object.values(l.platforms).find((p) => (p as { url?: string }).url)?.url as string | undefined;
+                      const handleClick = () => {
+                        if (platformUrl) window.open(platformUrl, '_blank', 'noopener');
+                        else navigate('/listings');
+                      };
+                      return (
+                        <div
+                          key={l.id}
+                          onClick={handleClick}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '6px 8px', borderRadius: 8, cursor: 'pointer', transition: 'background 0.12s',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            {l.images?.[0] ? (
+                              <img src={l.images[0]} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                            ) : (
+                              <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0 }} />
+                            )}
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{l.title}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                                {Object.keys(l.platforms).length > 0
+                                  ? Object.keys(l.platforms).map((p) => p).join(', ')
+                                  : 'Not listed anywhere'}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color }}>
+                              {neverSold ? 'Never sold' : `${days}d ago`}
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>last sale</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                    <span>Red = 60+ days or never sold · Yellow = 30+</span>
                     <button className="btn btn-ghost btn-sm" onClick={() => navigate('/listings')} style={{ fontSize: 11, padding: 0 }}>Manage</button>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Best Flips */}
-          {insightTab === 'flips' && (
-            <div>
-              {bestFlips.length === 0 ? (
-                <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No sales data yet</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                  {bestFlips.map((sale, i) => (
-                    <div key={sale.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 14, flexShrink: 0 }}>{i + 1}.</span>
-                      {sale.item_image_url && (
-                        <img src={sale.item_image_url} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                      )}
-                      <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {sale.item_title || sale.listing?.title || 'Unknown'}
-                      </span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: sale.profit >= 0 ? 'var(--neon-green)' : 'var(--neon-red)', flexShrink: 0 }}>
-                        {sale.profit >= 0 ? '+' : ''}{formatCurrency(sale.profit)}
-                      </span>
-                    </div>
-                  ))}
-                  <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
-                    Top 5 by profit · past 2Y
-                  </div>
-                </div>
+                </>
               )}
             </div>
           )}
