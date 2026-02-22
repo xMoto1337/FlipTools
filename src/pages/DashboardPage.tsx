@@ -124,11 +124,17 @@ export default function DashboardPage() {
   const now = Date.now();
 
   // Stale Listings: active listings sorted by time since their last sale
-  // Build a map of listingId → most recent sale date
+  // Build a title → listing id lookup for fallback matching (listing_id is rarely set on synced sales)
+  const listingByTitle = listings.reduce<Record<string, string>>((acc, l) => {
+    acc[l.title.toLowerCase().trim()] = l.id;
+    return acc;
+  }, {});
   const lastSaleByListing = recentSales.reduce<Record<string, number>>((acc, sale) => {
-    if (sale.listing_id) {
-      const t = new Date(sale.sold_at).getTime();
-      if (!acc[sale.listing_id] || t > acc[sale.listing_id]) acc[sale.listing_id] = t;
+    const t = new Date(sale.sold_at).getTime();
+    // Prefer direct listing_id link, fall back to title match
+    const listingId = sale.listing_id ?? listingByTitle[sale.item_title?.toLowerCase().trim() ?? ''];
+    if (listingId) {
+      if (!acc[listingId] || t > acc[listingId]) acc[listingId] = t;
     }
     return acc;
   }, {});
@@ -147,10 +153,11 @@ export default function DashboardPage() {
       if (a.daysSinceSale === null) return -1;
       if (b.daysSinceSale === null) return 1;
       return b.daysSinceSale - a.daysSinceSale;
-    });
+    })
+    .slice(0, 50);
 
-  // Best Flips: all sales sorted by profit descending (no cap — scrollable)
-  const bestFlips = [...recentSales].sort((a, b) => b.profit - a.profit);
+  // Best Flips: top 50 sales sorted by profit descending
+  const bestFlips = [...recentSales].sort((a, b) => b.profit - a.profit).slice(0, 50);
 
   // Monthly Snapshot: this month vs last month
   const startOfThisMonth = new Date(); startOfThisMonth.setDate(1); startOfThisMonth.setHours(0, 0, 0, 0);
@@ -480,7 +487,7 @@ export default function DashboardPage() {
                     ))}
                   </div>
                   <div style={{ paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                    {bestFlips.length} sales by profit · past 2Y · click to view in Analytics
+                    Top {bestFlips.length} by profit · past 2Y · click to view in Analytics
                   </div>
                 </>
               )}
