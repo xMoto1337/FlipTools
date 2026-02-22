@@ -176,9 +176,22 @@ export const analyticsApi = {
    * Sync sales from all connected platforms into Supabase.
    * Fetches orders from each platform API and upserts them.
    */
-  async syncPlatformSales(startDate?: string): Promise<{ synced: number; total: number; errors: string[] }> {
+  async syncPlatformSales(startDate?: string, force = false): Promise<{ synced: number; total: number; errors: string[] }> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
+
+    // Skip sync if we synced recently (10-minute cache) unless forced
+    const CACHE_KEY = `fliptools_sales_last_sync_${user.id}`;
+    const CACHE_TTL = 10 * 60 * 1000;
+    if (!force) {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached && Date.now() - Number(cached) < CACHE_TTL) {
+          console.log('[sync] Sales sync skipped — cached within 10 minutes');
+          return { synced: 0, total: 0, errors: [] };
+        }
+      } catch {}
+    }
 
     const { isConnected } = usePlatformStore.getState();
     let totalSynced = 0;
@@ -197,113 +210,52 @@ export const analyticsApi = {
 
       try {
         const adapter = getPlatform(platformId);
-        const platformSales = await adapter.getSales(
-          { startDate, limit: 200 },
-          token
-        );
+        const platformSales = await adapter.getSales({ startDate, limit: 200 }, token);
 
         console.log(`[sync] ${platformId}: fetched ${platformSales.length} sales`);
         totalFetched += platformSales.length;
 
         if (platformSales.length === 0) continue;
 
-        // Get existing external_ids to separate new vs existing
-        const orderIds = platformSales
-          .map((s) => s.orderId)
-          .filter((id): id is string => !!id);
+        // Single batch upsert — handles new and existing in one round-trip.
+        // ignoreDuplicates: false means existing rows get updated with fresh eBay data.
+        const rows = platformSales
+          .filter((item) => item.orderId)
+          .map((item) => ({
+            user_id: user.id,
+            platform: item.platform,
+            sale_price: item.price,
+            shipping_cost: item.shippingCost || 0,
+            platform_fees: item.platformFees || 0,
+            cost: 0,
+            buyer_username: item.buyerUsername || null,
+            sold_at: item.soldDate || new Date().toISOString(),
+            external_id: item.orderId,
+            item_title: item.title,
+            item_image_url: item.imageUrl || null,
+          }));
 
-        const { data: existing } = await supabase
-          .from('sales')
-          .select('id, external_id')
-          .eq('user_id', user.id)
-          .eq('platform', platformId)
-          .in('external_id', orderIds);
-
-        const existingMap = new Map<string, string>();
-        for (const row of existing || []) {
-          if (row.external_id) existingMap.set(row.external_id, row.id);
-        }
-
-        // Separate into new sales and existing sales that need updating
-        const newSales = platformSales.filter(
-          (item) => item.orderId && !existingMap.has(item.orderId)
-        );
-        const existingSales = platformSales.filter(
-          (item) => item.orderId && existingMap.has(item.orderId)
-        );
-
-        // Update existing sales with correct prices/fees
-        if (existingSales.length > 0) {
-          console.log(`[sync] ${platformId}: updating ${existingSales.length} existing sales`);
-          for (const item of existingSales) {
-            const dbId = existingMap.get(item.orderId!);
-            if (!dbId) continue;
-
-            const { error: updateErr } = await supabase
-              .from('sales')
-              .update({
-                sale_price: item.price,
-                shipping_cost: item.shippingCost || 0,
-                platform_fees: item.platformFees || 0,
-                item_title: item.title,
-                item_image_url: item.imageUrl || null,
-                buyer_username: item.buyerUsername || null,
-                sold_at: item.soldDate || undefined,
-              })
-              .eq('id', dbId);
-
-            if (updateErr) {
-              console.error(`[sync] Sale update failed for ${item.orderId}:`, updateErr);
-            } else {
-              totalSynced++;
-            }
-          }
-        }
-
-        if (newSales.length === 0 && existingSales.length > 0) {
-          console.log(`[sync] ${platformId}: updated ${existingSales.length} sales, no new ones`);
-          continue;
-        }
-
-        if (newSales.length === 0) {
-          console.log(`[sync] ${platformId}: all ${platformSales.length} sales already synced`);
-          totalSynced += platformSales.length;
-          continue;
-        }
-
-        console.log(`[sync] ${platformId}: inserting ${newSales.length} new sales`);
-
-        const rows = newSales.map((item) => ({
-          user_id: user.id,
-          platform: item.platform,
-          sale_price: item.price,
-          shipping_cost: item.shippingCost || 0,
-          platform_fees: item.platformFees || 0,
-          cost: 0,
-          buyer_username: item.buyerUsername || null,
-          sold_at: item.soldDate || new Date().toISOString(),
-          external_id: item.orderId,
-          item_title: item.title,
-          item_image_url: item.imageUrl || null,
-        }));
-
-        // Use upsert to handle any duplicate conflicts gracefully
         const { error } = await supabase.from('sales').upsert(rows, {
           onConflict: 'user_id,platform,external_id',
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         });
 
         if (error) {
-          console.error(`[sync] Batch upsert failed for ${platformId}:`, error);
+          console.error(`[sync] Upsert failed for ${platformId}:`, error);
           errors.push(`${platformId}: ${error.message}`);
         } else {
-          totalSynced += newSales.length;
+          totalSynced += rows.length;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[sync] Failed to sync ${platformId} sales:`, msg);
         errors.push(`${platformId}: ${msg}`);
       }
+    }
+
+    // Cache successful sync time
+    if (errors.length === 0) {
+      try { localStorage.setItem(CACHE_KEY, String(Date.now())); } catch {}
     }
 
     console.log(`[sync] Done — synced ${totalSynced}/${totalFetched}, errors: ${errors.length}`);

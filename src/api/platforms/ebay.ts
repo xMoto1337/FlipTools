@@ -37,12 +37,23 @@ const CONDITION_MAP: Record<string, string> = {
 
 // All eBay API calls must go through our proxy to avoid CORS issues
 async function ebayGet(endpoint: string, token: string): Promise<Response> {
-  const resp = await fetch('/api/ebay-proxy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ endpoint, token, method: 'GET' }),
-  });
-  return resp;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000); // 30-second timeout
+  try {
+    return await fetch('/api/ebay-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint, token, method: 'GET' }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('eBay request timed out — please try again');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function ebayPost(endpoint: string, token: string, payload: unknown): Promise<Response> {
@@ -437,60 +448,9 @@ export const ebayAdapter: PlatformAdapter = {
       offset += orders.length;
     }
 
-    // Try to fetch shipping label costs from Finances API
-    // These are deducted from seller payouts but not shown in Fulfillment API
-    const shippingLabelCosts = new Map<string, number>();
-    try {
-      let labelOffset = 0;
-      while (true) {
-        const dateFilter = startDate
-          ? `,transactionDate:[${toEbayDate(new Date(startDate).toISOString())}..${toEbayDate(new Date().toISOString())}]`
-          : '';
-        const labelParams = new URLSearchParams({
-          limit: '200',
-          offset: String(labelOffset),
-          filter: `transactionType:{SHIPPING_LABEL}${dateFilter}`,
-        });
-        const labelResp = await ebayGet(`/sell/finances/v1/transaction?${labelParams}`, token);
-        if (!labelResp.ok) {
-          console.warn('[ebay] Could not fetch shipping labels from Finances API:', labelResp.status);
-          break;
-        }
-        const labelData = await labelResp.json();
-        const txs = labelData.transactions || [];
-        if (txs.length === 0) break;
-
-        for (const tx of txs) {
-          const orderId = tx.orderId as string;
-          if (!orderId) continue;
-          const cost = Math.abs(Number((tx.amount as Record<string, string>)?.value || 0));
-          shippingLabelCosts.set(orderId, (shippingLabelCosts.get(orderId) || 0) + cost);
-        }
-        if (txs.length < 200) break;
-        labelOffset += txs.length;
-      }
-      if (shippingLabelCosts.size > 0) {
-        console.log(`[ebay] Found ${shippingLabelCosts.size} shipping label costs from Finances API`);
-      }
-    } catch (err) {
-      console.warn('[ebay] Shipping label fetch failed (non-critical):', err);
-    }
-
-    // Apply shipping label costs to matching orders
-    if (shippingLabelCosts.size > 0) {
-      for (const order of allOrders) {
-        const labelCost = shippingLabelCosts.get(order.orderId || '');
-        if (labelCost) {
-          order.shippingCost = Math.round(labelCost * 100) / 100;
-          console.log(`[ebay] Order ${order.orderId}: adding shipping label cost $${labelCost.toFixed(2)}`);
-        }
-      }
-    }
-
-    // Clear the finances fallback flag since we don't need it for the main flow
-    try { localStorage.removeItem('fliptools_ebay_finances_fallback'); } catch {}
-
-    console.log(`[ebay] getSales: ${allOrders.length} orders from Fulfillment API, ${shippingLabelCosts.size} shipping labels`);
+    // Note: Finances API (shipping label costs) was removed — profit is already accurate
+    // from the Fulfillment API's totalDueSeller payout field when available.
+    console.log(`[ebay] getSales: ${allOrders.length} orders`);
     return allOrders;
   },
 

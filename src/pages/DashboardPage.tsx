@@ -33,7 +33,7 @@ export default function DashboardPage() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const runSyncAndLoad = async (cancelled: { current: boolean }) => {
+  const runSyncAndLoad = async (cancelled: { current: boolean }, force = false) => {
     setSyncError('');
 
     // Only sync if not already syncing (prevents race conditions on tab switch)
@@ -41,7 +41,7 @@ export default function DashboardPage() {
     if (!store.isSyncing) {
       setSyncing(true);
       try {
-        const result = await analyticsApi.syncPlatformSales();
+        const result = await analyticsApi.syncPlatformSales(undefined, force);
         if (!cancelled.current) {
           setLastSyncedAt(new Date().toISOString());
           setLastSynced(new Date());
@@ -67,12 +67,18 @@ export default function DashboardPage() {
 
     if (cancelled.current) return;
 
-    // Load 7-day stats for dashboard
+    // Load dashboard data: 7-day stats, recent 10 sales for table,
+    // and up to 500 sales over 2 years for platform breakdown
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    const twoYearsAgo = (() => {
+      const d = new Date();
+      d.setFullYear(d.getFullYear() - 2);
+      return d.toISOString();
+    })();
     try {
       const [statsData, salesData, allListings] = await Promise.all([
         analyticsApi.getStats(sevenDaysAgo),
-        analyticsApi.getSales({ limit: 10 }),
+        analyticsApi.getSales({ startDate: twoYearsAgo, limit: 500 }),
         listingsApi.getAll(),
       ]);
       if (!cancelled.current) {
@@ -96,7 +102,7 @@ export default function DashboardPage() {
     if (isRefreshing || isSyncing) return;
     setIsRefreshing(true);
     const cancelled = { current: false };
-    await runSyncAndLoad(cancelled);
+    await runSyncAndLoad(cancelled, true); // force = true bypasses 10-min cache
     setIsRefreshing(false);
   };
 
@@ -263,7 +269,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {recentSales.map((sale) => (
+              {recentSales.slice(0, 10).map((sale) => (
                 <tr key={sale.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -302,7 +308,7 @@ export default function DashboardPage() {
         <div className="card">
           <div className="card-header">
             <div className="card-title">Platform Performance</div>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>All-time</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Past 2Y</span>
           </div>
           {platformEntries.length === 0 ? (
             <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
