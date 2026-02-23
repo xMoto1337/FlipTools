@@ -90,31 +90,20 @@ export default function CrossListPage() {
   const { allowed: crossListAllowed } = useFeatureGate('cross-list');
   const platforms = getAllPlatforms();
 
-  // All collections: union of what's in the DB + user-created empty ones
+  // All collections: only user-created ones (stored in localStorage)
   const allCollections = useMemo(() => {
-    const fromDB = listings
-      .filter(l => l.status === 'active' || l.status === 'draft')
-      .map(l => l.category?.trim())
-      .filter((c): c is string => !!c);
-    return [...new Set([...userCollections, ...fromDB])].sort();
-  }, [listings, userCollections]);
+    return [...userCollections].sort();
+  }, [userCollections]);
 
   const eligibleListings = useMemo(
     () => listings.filter(l => l.status === 'active' || l.status === 'draft'),
     [listings]
   );
 
-  const uncategorizedCount = useMemo(
-    () => eligibleListings.filter(l => !l.category?.trim()).length,
-    [eligibleListings]
-  );
-
   // Listings visible in the current tab + search
   const visibleListings = useMemo(() => {
     let result = eligibleListings;
-    if (activeCollection === '__uncategorized__') {
-      result = result.filter(l => !l.category?.trim());
-    } else if (activeCollection !== '__all__') {
+    if (activeCollection !== '__all__') {
       result = result.filter(l => l.category?.trim() === activeCollection);
     }
     if (searchQuery) {
@@ -289,22 +278,6 @@ export default function CrossListPage() {
             );
           })}
 
-          {/* Uncategorized (only if items exist) */}
-          {uncategorizedCount > 0 && (
-            <button
-              onClick={() => setActiveCollection('__uncategorized__')}
-              style={{
-                padding: '5px 16px', borderRadius: 20, cursor: 'pointer',
-                border: `1.5px solid ${activeCollection === '__uncategorized__' ? 'var(--border-color)' : 'transparent'}`,
-                background: 'var(--bg-tertiary)',
-                color: activeCollection === '__uncategorized__' ? 'var(--text-primary)' : 'var(--text-muted)',
-                fontWeight: 600, fontSize: 13, transition: 'all 0.15s',
-              }}
-            >
-              Unsorted · {uncategorizedCount}
-            </button>
-          )}
-
           {/* New collection */}
           {showNewInput ? (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -358,7 +331,7 @@ export default function CrossListPage() {
           <input
             type="text"
             className="form-input"
-            placeholder={`Search${activeCollection !== '__all__' && activeCollection !== '__uncategorized__' ? ` in "${activeCollection}"` : ' all listings'}...`}
+            placeholder={`Search${activeCollection !== '__all__' ? ` in "${activeCollection}"` : ' all listings'}...`}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
@@ -394,7 +367,7 @@ export default function CrossListPage() {
                   </button>
                 );
               })}
-              {activeCollection !== '__all__' && activeCollection !== '__uncategorized__' && (
+              {activeCollection !== '__all__' && (
                 <button
                   onClick={() => moveSelectedTo(null)}
                   style={{
@@ -425,9 +398,7 @@ export default function CrossListPage() {
               ? 'No listings match your search.'
               : activeCollection === '__all__'
                 ? 'No active listings yet.'
-                : activeCollection === '__uncategorized__'
-                  ? 'All listings are sorted into collections.'
-                  : (
+                : (
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>This collection is empty</div>
                       <div style={{ fontSize: 13 }}>Go to "All", select listings, then move them here</div>
@@ -509,20 +480,20 @@ export default function CrossListPage() {
 
                     {/* Image */}
                     <div style={{ width: '100%', paddingBottom: '85%', position: 'relative', background: 'var(--bg-card)' }}>
-                      {listing.images?.[0] ? (
+                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1">
+                          <rect x="3" y="3" width="18" height="18" rx="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <path d="M21 15l-5-5L5 21" />
+                        </svg>
+                      </div>
+                      {listing.images?.[0] && (
                         <img
                           src={listing.images[0]}
                           alt={listing.title}
                           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
-                      ) : (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <path d="M21 15l-5-5L5 21" />
-                          </svg>
-                        </div>
                       )}
                     </div>
 
@@ -641,16 +612,13 @@ export default function CrossListPage() {
                     display: 'flex', gap: 10, padding: 12, borderRadius: 8,
                     background: 'var(--bg-hover)', border: '1px solid var(--border)',
                   }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: 'var(--bg-card)' }}>
-                      {listing.images?.[0] ? (
-                        <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                          </svg>
-                        </div>
+                    <div style={{ position: 'relative', width: 48, height: 48, borderRadius: 6, flexShrink: 0, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {listing.images?.[0] && (
+                        <img src={listing.images[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                       )}
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                      </svg>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

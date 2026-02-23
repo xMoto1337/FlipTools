@@ -345,17 +345,17 @@ export default function DashboardPage() {
                 <tr key={sale.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {sale.item_image_url ? (
-                        <img
-                          src={sale.item_image_url}
-                          alt=""
-                          style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
-                        />
-                      ) : (
-                        <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                        </div>
-                      )}
+                      <div style={{ position: 'relative', width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {sale.item_image_url && (
+                          <img
+                            src={sale.item_image_url}
+                            alt=""
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 4, objectFit: 'cover' }}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        )}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                      </div>
                       <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {sale.item_title || sale.listing?.title || 'Unknown item'}
                       </span>
@@ -469,13 +469,12 @@ export default function DashboardPage() {
                         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                       >
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 18, flexShrink: 0, textAlign: 'right' }}>{i + 1}.</span>
-                        {sale.item_image_url ? (
-                          <img src={sale.item_image_url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                        ) : (
-                          <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                          </div>
-                        )}
+                        <div style={{ position: 'relative', width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {sale.item_image_url && (
+                            <img src={sale.item_image_url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 4, objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                          )}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {sale.item_title || sale.listing?.title || 'Unknown'}
@@ -531,11 +530,11 @@ export default function DashboardPage() {
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            {l.images?.[0] ? (
-                              <img src={l.images[0]} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                            ) : (
-                              <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0 }} />
-                            )}
+                            <div style={{ position: 'relative', width: 28, height: 28, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0 }}>
+                              {l.images?.[0] && (
+                                <img src={l.images[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 4, objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                              )}
+                            </div>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{l.title}</div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1, display: 'flex', gap: 5, alignItems: 'center' }}>

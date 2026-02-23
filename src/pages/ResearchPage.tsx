@@ -343,7 +343,7 @@ export default function ResearchPage() {
           <div className="comp-grid" style={{ marginBottom: 24 }}>
             {results.map((item, i) => (
               <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" className="comp-card" style={{ textDecoration: 'none', color: 'inherit' }}>
-                {item.imageUrl && <img src={item.imageUrl} alt={item.title} />}
+                {item.imageUrl && <img src={item.imageUrl} alt={item.title} onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                 <div className="comp-card-body">
                   <div className="comp-card-title">{item.title}</div>
                   <div className="comp-card-price">${item.price.toFixed(2)}</div>

@@ -598,12 +598,11 @@ export default function ListingsPage() {
                 onClick={() => toggleSelect(listing.id)}
               >
                 <div style={{ position: 'relative' }}>
-                  {listing.images[0] ? (
-                    <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" />
-                  ) : (
-                    <div className="listing-image-placeholder">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                    </div>
+                  <div className="listing-image-placeholder">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  </div>
+                  {listing.images[0] && (
+                    <img src={listing.images[0]} alt={listing.title} className="listing-image" loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                   )}
                   {platformCount > 0 && (
                     <div style={{
@@ -703,13 +702,12 @@ export default function ListingsPage() {
                       <input type="checkbox" className="table-checkbox" checked={selectedIds.has(listing.id)} onChange={() => toggleSelect(listing.id)} />
                     </td>
                     <td style={{ padding: '8px' }}>
-                      {listing.images[0] ? (
-                        <img src={listing.images[0]} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} loading="lazy" />
-                      ) : (
-                        <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-                        </div>
-                      )}
+                      <div style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {listing.images[0] && (
+                          <img src={listing.images[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 6, objectFit: 'cover' }} loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        )}
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                      </div>
                     </td>
                     <td>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{listing.title}</div>
@@ -1142,13 +1140,12 @@ export default function ListingsPage() {
                       }}>
                         {/* Thumbnail */}
                         <div style={{ flexShrink: 0 }}>
-                          {listing.images[0] ? (
-                            <img src={listing.images[0]} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover' }} />
-                          ) : (
-                            <div style={{ width: 56, height: 56, borderRadius: 8, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-                            </div>
-                          )}
+                          <div style={{ position: 'relative', width: 56, height: 56, borderRadius: 8, background: 'var(--bg-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {listing.images[0] && (
+                              <img src={listing.images[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 8, objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                            )}
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                          </div>
                         </div>
                         {/* Info */}
                         <div style={{ flex: 1, minWidth: 0 }}>
