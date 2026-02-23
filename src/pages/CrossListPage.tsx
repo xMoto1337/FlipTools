@@ -65,6 +65,21 @@ function validateListingForPlatform(listing: Listing, platformId: string): Valid
   return { errors, warnings };
 }
 
+// Guess a category from listing title keywords when DB category is null
+function guessCategoryFromTitle(title: string): string | null {
+  const l = title.toLowerCase();
+  if (/shoe|sneaker|boot|sandal|heel|slipper|loafer|moccasin|clog/.test(l)) return 'shoes';
+  if (/shirt|pants|jacket|dress|coat|sweater|hoodie|jeans|tee|top|bottom|skirt|suit|vest|blouse|swimwear|underwear|legging|cardigan|blazer|shorts|polo|flannel|bomber/.test(l)) return 'clothing';
+  if (/iphone|samsung|pixel|android|phone|laptop|macbook|ipad|tablet|camera|headphone|airpod|speaker|playstation|xbox|nintendo|gaming|console|monitor|tv|keyboard|mouse|drone/.test(l)) return 'electronics';
+  if (/lego|pokemon|funko|action figure|hot wheels|doll|stuffed animal|toy|puzzle|playset/.test(l)) return 'toys';
+  if (/vintage|antique|coin|stamp|trading card|sports card|memorabilia|figurine|collectible/.test(l)) return 'collectibles';
+  if (/watch|necklace|bracelet|ring|earring|jewelry|pendant|brooch/.test(l)) return 'jewelry';
+  if (/book|novel|textbook|dvd|blu-ray|blu ray|vinyl|record|cd|magazine/.test(l)) return 'media';
+  if (/golf|soccer|football|baseball|basketball|tennis|cycling|snowboard|ski|skateboard|fitness|yoga|gym|weightlifting/.test(l)) return 'sports';
+  if (/furniture|lamp|rug|decor|kitchen|appliance|bedding|toolbox|garden|patio|outdoor|candle|picture frame/.test(l)) return 'home';
+  return null;
+}
+
 const PLATFORM_COLORS: Record<string, string> = {
   ebay: '#e53238',
   etsy: '#f1641e',
@@ -117,7 +132,7 @@ export default function CrossListPage() {
   const categorizedListings = useMemo(() => {
     const map = new Map<string, typeof eligibleListings>();
     for (const l of eligibleListings) {
-      const key = l.category?.trim() || '__uncategorized__';
+      const key = l.category?.trim() || guessCategoryFromTitle(l.title) || '__uncategorized__';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(l);
     }

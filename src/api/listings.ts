@@ -3,6 +3,21 @@ import { usePlatformStore } from '../stores/platformStore';
 import { getPlatform, getPlatformIds } from './platforms';
 import { analyticsApi } from './analytics';
 
+// Keyword-based category fallback when the platform API doesn't return a category
+function guessCategoryFromTitle(title: string): string | null {
+  const l = title.toLowerCase();
+  if (/shoe|sneaker|boot|sandal|heel|slipper|loafer|moccasin|clog/.test(l)) return 'shoes';
+  if (/shirt|pants|jacket|dress|coat|sweater|hoodie|jeans|tee|top|bottom|skirt|suit|vest|blouse|swimwear|underwear|legging|cardigan|blazer|shorts|polo|flannel|bomber/.test(l)) return 'clothing';
+  if (/iphone|samsung|pixel|android|phone|laptop|macbook|ipad|tablet|camera|headphone|airpod|speaker|playstation|xbox|nintendo|gaming|console|monitor|tv|keyboard|mouse|drone/.test(l)) return 'electronics';
+  if (/lego|pokemon|funko|action figure|hot wheels|doll|stuffed animal|toy|puzzle|playset/.test(l)) return 'toys';
+  if (/vintage|antique|coin|stamp|trading card|sports card|memorabilia|figurine|collectible/.test(l)) return 'collectibles';
+  if (/watch|necklace|bracelet|ring|earring|jewelry|pendant|brooch/.test(l)) return 'jewelry';
+  if (/book|novel|textbook|dvd|blu-ray|blu ray|vinyl|record|cd|magazine/.test(l)) return 'media';
+  if (/golf|soccer|football|baseball|basketball|tennis|cycling|snowboard|ski|skateboard|fitness|yoga|gym|weightlifting/.test(l)) return 'sports';
+  if (/furniture|lamp|rug|decor|kitchen|appliance|bedding|toolbox|garden|patio|outdoor|candle|picture frame/.test(l)) return 'home';
+  return null;
+}
+
 export interface Listing {
   id: string;
   user_id: string;
@@ -261,6 +276,7 @@ export const listingsApi = {
               createdAt: item.createdAt,
               condition: item.condition || undefined,
               category: item.category || undefined,
+              title: item.title || undefined,
             });
           } else {
             // Insert new listing — use eBay startTime as created_at if available
@@ -270,7 +286,7 @@ export const listingsApi = {
               description: item.description || null,
               price: item.price || null,
               quantity: item.quantity ?? 1,
-              category: item.category || null,
+              category: item.category || guessCategoryFromTitle(item.title || '') || null,
               condition: item.condition || null,
               images: item.images || [],
               status: item.status === 'active' ? 'active' : item.status === 'sold' ? 'sold' : 'ended',
@@ -308,7 +324,8 @@ export const listingsApi = {
           if (item.images !== undefined) updates.images = item.images;
           if (item.createdAt) updates.created_at = item.createdAt;
           if (item.condition) updates.condition = item.condition;
-          if (item.category) updates.category = item.category;
+          const resolvedCategory = item.category || guessCategoryFromTitle(item.title || '') || null;
+          if (resolvedCategory) updates.category = resolvedCategory;
 
           const { error: updateErr } = await supabase
             .from('listings')
