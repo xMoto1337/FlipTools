@@ -9,6 +9,7 @@ import { useFeatureGate } from '../hooks/useSubscription';
 import { PaywallGate } from '../components/Subscription/PaywallGate';
 import { formatCurrency } from '../utils/formatters';
 import { supabase } from '../api/supabase';
+import { autoDetectCategory } from '../utils/categorize';
 
 interface ValidationResult {
   errors: string[];   // blocking — must fix before posting
@@ -70,6 +71,7 @@ const CATEGORY_OPTIONS = [
   'home', 'jewelry', 'media', 'sports', 'other',
 ] as const;
 
+
 const PLATFORM_COLORS: Record<string, string> = {
   ebay: '#e53238',
   etsy: '#f1641e',
@@ -86,6 +88,8 @@ export default function CrossListPage() {
   const [isCrossListing, setIsCrossListing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [isSorting, setIsSorting] = useState(false);
 
   const { allowed: crossListAllowed } = useFeatureGate('cross-list');
   const platforms = getAllPlatforms();
@@ -93,6 +97,27 @@ export default function CrossListPage() {
   const setListingCategory = async (listingId: string, category: string) => {
     await supabase.from('listings').update({ category }).eq('id', listingId);
     updateListing(listingId, { category });
+  };
+
+  const autoCategorize = async (catListings: typeof eligibleListings) => {
+    setIsSorting(true);
+    const toUpdate = catListings
+      .map((l) => ({ id: l.id, category: autoDetectCategory(l.title) }))
+      .filter((x): x is { id: string; category: string } => x.category !== null);
+
+    for (const { id, category } of toUpdate) {
+      await supabase.from('listings').update({ category }).eq('id', id);
+      updateListing(id, { category });
+    }
+    setIsSorting(false);
+  };
+
+  const applyBulkCategory = async () => {
+    if (!bulkCategory || selectedListings.size === 0) return;
+    const ids = [...selectedListings];
+    await supabase.from('listings').update({ category: bulkCategory }).in('id', ids);
+    ids.forEach((id) => updateListing(id, { category: bulkCategory }));
+    setBulkCategory('');
   };
 
   // Pre-flight validation: compute errors/warnings for each selected listing × target platform
@@ -251,9 +276,34 @@ export default function CrossListPage() {
                 : `${eligibleListings.length} listings`}
             </span>
             {selectedListings.size > 0 && (
-              <button className="btn btn-sm btn-secondary" onClick={deselectAll} style={{ fontSize: 12 }}>
-                Clear All
-              </button>
+              <>
+                <select
+                  value={bulkCategory}
+                  onChange={(e) => setBulkCategory(e.target.value)}
+                  style={{
+                    fontSize: 12, padding: '4px 8px', borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer',
+                  }}
+                >
+                  <option value="">Set category…</option>
+                  {CATEGORY_OPTIONS.map((c) => (
+                    <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                  ))}
+                </select>
+                {bulkCategory && (
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={applyBulkCategory}
+                    style={{ fontSize: 12 }}
+                  >
+                    Apply to {selectedListings.size}
+                  </button>
+                )}
+                <button className="btn btn-sm btn-secondary" onClick={deselectAll} style={{ fontSize: 12 }}>
+                  Clear All
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -330,6 +380,18 @@ export default function CrossListPage() {
                       }}>
                         {selectedInCat} selected
                       </span>
+                    )}
+
+                    {/* Auto-sort button for Uncategorized */}
+                    {cat === '__uncategorized__' && (
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={(e) => { e.stopPropagation(); autoCategorize(catListings); }}
+                        disabled={isSorting}
+                        style={{ fontSize: 11, padding: '2px 10px', flexShrink: 0 }}
+                      >
+                        {isSorting ? 'Sorting…' : '✦ Auto-sort'}
+                      </button>
                     )}
 
                     {/* Select / Deselect all in category */}

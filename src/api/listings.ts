@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { usePlatformStore } from '../stores/platformStore';
 import { getPlatform, getPlatformIds } from './platforms';
 import { analyticsApi } from './analytics';
+import { autoDetectCategory } from '../utils/categorize';
 
 
 export interface Listing {
@@ -272,7 +273,7 @@ export const listingsApi = {
               description: item.description || null,
               price: item.price || null,
               quantity: item.quantity ?? 1,
-              category: item.category || null,
+              category: item.category || autoDetectCategory(item.title || '') || null,
               condition: item.condition || null,
               images: item.images || [],
               status: item.status === 'active' ? 'active' : item.status === 'sold' ? 'sold' : 'ended',
@@ -310,7 +311,8 @@ export const listingsApi = {
           if (item.images !== undefined) updates.images = item.images;
           if (item.createdAt) updates.created_at = item.createdAt;
           if (item.condition) updates.condition = item.condition;
-          if (item.category) updates.category = item.category;
+          const detectedCategory = item.category || autoDetectCategory(item.title || '');
+          if (detectedCategory) updates.category = detectedCategory;
 
           const { error: updateErr } = await supabase
             .from('listings')
