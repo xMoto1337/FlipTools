@@ -239,17 +239,23 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredSales.map((sale) => (
+              {filteredSales.map((sale) => {
+                const saleImg = sale.item_image_url || sale.listing?.images?.[0];
+                return (
                 <tr key={sale.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {sale.item_image_url && (
-                        <img
-                          src={sale.item_image_url}
-                          alt=""
-                          style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }}
-                        />
-                      )}
+                      <div style={{ position: 'relative', width: 32, height: 32, borderRadius: 4, background: 'var(--bg-tertiary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {saleImg && (
+                          <img
+                            src={saleImg}
+                            alt=""
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 4, objectFit: 'cover' }}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        )}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                      </div>
                       {sale.item_title || sale.listing?.title || 'Unknown item'}
                     </div>
                   </td>
@@ -261,7 +267,7 @@ export default function AnalyticsPage() {
                   </td>
                   <td style={{ color: 'var(--text-muted)' }}>{formatDate(sale.sold_at)}</td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         )}
