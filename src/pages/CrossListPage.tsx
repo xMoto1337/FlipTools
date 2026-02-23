@@ -65,30 +65,10 @@ function validateListingForPlatform(listing: Listing, platformId: string): Valid
   return { errors, warnings };
 }
 
-// Guess a category from listing title keywords when DB category is null.
-// Uses strict word boundaries to avoid false positives (e.g. "top" in "laptop").
-function guessCategoryFromTitle(title: string): string | null {
-  const l = title.toLowerCase();
-  // Shoes — explicit footwear words only
-  if (/\bsneakers?\b|\bshoes?\b|\bboots?\b|\bsandals?\b|\bslippers?\b|\bloafers?\b|\bmoccasins?\b|\bclogs?\b|\bfootwear\b|\bheels?\b/.test(l)) return 'shoes';
-  // Clothing — unambiguous garment words (no "top", "tee", "bottom" — too many false positives)
-  if (/\bt-shirt\b|tshirt|\bshirts?\b|\bhoodie|\bsweater\b|\bjacket\b|\bdress\b|\bjeans\b|\bpants\b|\bskirt\b|\bblouse\b|\bcardigan\b|\bblazer\b|\bwindbreaker\b|\bshorts\b|\bparka\b|\btrousers?\b|\bpullover\b|\bleggings?\b|\bsweatshirt\b/.test(l)) return 'clothing';
-  // Electronics — specific devices and brands
-  if (/\biphone\b|\bipad\b|\bmacbook\b|\blaptop\b|\bheadphones?\b|\bairpods?\b|\bplaystation\b|\bxbox\b|\bnintendo\b|\bgpu\b|\bcpu\b|\bdrone\b/.test(l)) return 'electronics';
-  // Toys
-  if (/\blego\b|\bpokémon\b|\bpokemon\b|\bfunko\b|\baction figure\b|\bhot wheels\b/.test(l)) return 'toys';
-  // Collectibles
-  if (/\bvintage\b|\bantique\b|\bcollectible\b|\bmemorabil|\btrading card\b|\bsports card\b/.test(l)) return 'collectibles';
-  // Jewelry
-  if (/\bjewelry\b|\bnecklace\b|\bbracelet\b|\bearrings?\b|\bpendant\b/.test(l)) return 'jewelry';
-  // Media
-  if (/\bvinyl\b|\bdvd\b|\bblu-ray\b|\brecord\b/.test(l)) return 'media';
-  // Sports
-  if (/\bskateboard\b|\bsnowboard\b|\bsurfboard\b/.test(l)) return 'sports';
-  // Home
-  if (/\bfurniture\b|\bchandelier\b|\bbedding\b|\bcookware\b/.test(l)) return 'home';
-  return null; // Don't guess if not confident
-}
+const CATEGORY_OPTIONS = [
+  'clothing', 'shoes', 'electronics', 'toys', 'collectibles',
+  'home', 'jewelry', 'media', 'sports', 'other',
+] as const;
 
 const PLATFORM_COLORS: Record<string, string> = {
   ebay: '#e53238',
@@ -109,6 +89,11 @@ export default function CrossListPage() {
 
   const { allowed: crossListAllowed } = useFeatureGate('cross-list');
   const platforms = getAllPlatforms();
+
+  const setListingCategory = async (listingId: string, category: string) => {
+    await supabase.from('listings').update({ category }).eq('id', listingId);
+    updateListing(listingId, { category });
+  };
 
   // Pre-flight validation: compute errors/warnings for each selected listing × target platform
   const validationMap = useMemo(() => {
@@ -142,7 +127,7 @@ export default function CrossListPage() {
   const categorizedListings = useMemo(() => {
     const map = new Map<string, typeof eligibleListings>();
     for (const l of eligibleListings) {
-      const key = l.category?.trim() || guessCategoryFromTitle(l.title) || '__uncategorized__';
+      const key = l.category?.trim() || '__uncategorized__';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(l);
     }
@@ -423,6 +408,25 @@ export default function CrossListPage() {
                                   <span key={p} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `color-mix(in srgb, ${PLATFORM_COLORS[p] || '#888'} 15%, transparent)`, color: PLATFORM_COLORS[p] || '#888', fontWeight: 600, textTransform: 'uppercase' }}>{p}</span>
                                 ))}
                                 {existingPlatforms.length === 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Not listed anywhere</span>}
+                              </div>
+                              {/* Category selector */}
+                              <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 2 }}>
+                                <select
+                                  value={listing.category || ''}
+                                  onChange={(e) => setListingCategory(listing.id, e.target.value)}
+                                  style={{
+                                    fontSize: 10, padding: '2px 4px', borderRadius: 4,
+                                    border: '1px solid var(--border)',
+                                    background: listing.category ? 'color-mix(in srgb, var(--neon-cyan) 10%, var(--bg-card))' : 'var(--bg-tertiary)',
+                                    color: listing.category ? 'var(--neon-cyan)' : 'var(--text-muted)',
+                                    cursor: 'pointer', maxWidth: '100%',
+                                  }}
+                                >
+                                  <option value="">Set category...</option>
+                                  {CATEGORY_OPTIONS.map((c) => (
+                                    <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                  ))}
+                                </select>
                               </div>
                               {/* Cross-list status */}
                               {statusEntries.some((s) => s.status) && (

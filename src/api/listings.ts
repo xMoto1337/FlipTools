@@ -3,21 +3,6 @@ import { usePlatformStore } from '../stores/platformStore';
 import { getPlatform, getPlatformIds } from './platforms';
 import { analyticsApi } from './analytics';
 
-// Keyword-based category fallback when the platform API doesn't return a category.
-// Uses strict word boundaries to avoid false positives (e.g. "top" in "laptop").
-function guessCategoryFromTitle(title: string): string | null {
-  const l = title.toLowerCase();
-  if (/\bsneakers?\b|\bshoes?\b|\bboots?\b|\bsandals?\b|\bslippers?\b|\bloafers?\b|\bmoccasins?\b|\bclogs?\b|\bfootwear\b|\bheels?\b/.test(l)) return 'shoes';
-  if (/\bt-shirt\b|tshirt|\bshirts?\b|\bhoodie|\bsweater\b|\bjacket\b|\bdress\b|\bjeans\b|\bpants\b|\bskirt\b|\bblouse\b|\bcardigan\b|\bblazer\b|\bwindbreaker\b|\bshorts\b|\bparka\b|\btrousers?\b|\bpullover\b|\bleggings?\b|\bsweatshirt\b/.test(l)) return 'clothing';
-  if (/\biphone\b|\bipad\b|\bmacbook\b|\blaptop\b|\bheadphones?\b|\bairpods?\b|\bplaystation\b|\bxbox\b|\bnintendo\b|\bgpu\b|\bcpu\b|\bdrone\b/.test(l)) return 'electronics';
-  if (/\blego\b|\bpokémon\b|\bpokemon\b|\bfunko\b|\baction figure\b|\bhot wheels\b/.test(l)) return 'toys';
-  if (/\bvintage\b|\bantique\b|\bcollectible\b|\bmemorabil|\btrading card\b|\bsports card\b/.test(l)) return 'collectibles';
-  if (/\bjewelry\b|\bnecklace\b|\bbracelet\b|\bearrings?\b|\bpendant\b/.test(l)) return 'jewelry';
-  if (/\bvinyl\b|\bdvd\b|\bblu-ray\b|\brecord\b/.test(l)) return 'media';
-  if (/\bskateboard\b|\bsnowboard\b|\bsurfboard\b/.test(l)) return 'sports';
-  if (/\bfurniture\b|\bchandelier\b|\bbedding\b|\bcookware\b/.test(l)) return 'home';
-  return null;
-}
 
 export interface Listing {
   id: string;
@@ -287,7 +272,7 @@ export const listingsApi = {
               description: item.description || null,
               price: item.price || null,
               quantity: item.quantity ?? 1,
-              category: item.category || guessCategoryFromTitle(item.title || '') || null,
+              category: item.category || null,
               condition: item.condition || null,
               images: item.images || [],
               status: item.status === 'active' ? 'active' : item.status === 'sold' ? 'sold' : 'ended',
@@ -325,8 +310,7 @@ export const listingsApi = {
           if (item.images !== undefined) updates.images = item.images;
           if (item.createdAt) updates.created_at = item.createdAt;
           if (item.condition) updates.condition = item.condition;
-          const resolvedCategory = item.category || guessCategoryFromTitle(item.title || '') || null;
-          if (resolvedCategory) updates.category = resolvedCategory;
+          if (item.category) updates.category = item.category;
 
           const { error: updateErr } = await supabase
             .from('listings')
