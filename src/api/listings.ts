@@ -3,18 +3,19 @@ import { usePlatformStore } from '../stores/platformStore';
 import { getPlatform, getPlatformIds } from './platforms';
 import { analyticsApi } from './analytics';
 
-// Keyword-based category fallback when the platform API doesn't return a category
+// Keyword-based category fallback when the platform API doesn't return a category.
+// Uses strict word boundaries to avoid false positives (e.g. "top" in "laptop").
 function guessCategoryFromTitle(title: string): string | null {
   const l = title.toLowerCase();
-  if (/shoe|sneaker|boot|sandal|heel|slipper|loafer|moccasin|clog/.test(l)) return 'shoes';
-  if (/shirt|pants|jacket|dress|coat|sweater|hoodie|jeans|tee|top|bottom|skirt|suit|vest|blouse|swimwear|underwear|legging|cardigan|blazer|shorts|polo|flannel|bomber/.test(l)) return 'clothing';
-  if (/iphone|samsung|pixel|android|phone|laptop|macbook|ipad|tablet|camera|headphone|airpod|speaker|playstation|xbox|nintendo|gaming|console|monitor|tv|keyboard|mouse|drone/.test(l)) return 'electronics';
-  if (/lego|pokemon|funko|action figure|hot wheels|doll|stuffed animal|toy|puzzle|playset/.test(l)) return 'toys';
-  if (/vintage|antique|coin|stamp|trading card|sports card|memorabilia|figurine|collectible/.test(l)) return 'collectibles';
-  if (/watch|necklace|bracelet|ring|earring|jewelry|pendant|brooch/.test(l)) return 'jewelry';
-  if (/book|novel|textbook|dvd|blu-ray|blu ray|vinyl|record|cd|magazine/.test(l)) return 'media';
-  if (/golf|soccer|football|baseball|basketball|tennis|cycling|snowboard|ski|skateboard|fitness|yoga|gym|weightlifting/.test(l)) return 'sports';
-  if (/furniture|lamp|rug|decor|kitchen|appliance|bedding|toolbox|garden|patio|outdoor|candle|picture frame/.test(l)) return 'home';
+  if (/\bsneakers?\b|\bshoes?\b|\bboots?\b|\bsandals?\b|\bslippers?\b|\bloafers?\b|\bmoccasins?\b|\bclogs?\b|\bfootwear\b|\bheels?\b/.test(l)) return 'shoes';
+  if (/\bt-shirt\b|tshirt|\bshirts?\b|\bhoodie|\bsweater\b|\bjacket\b|\bdress\b|\bjeans\b|\bpants\b|\bskirt\b|\bblouse\b|\bcardigan\b|\bblazer\b|\bwindbreaker\b|\bshorts\b|\bparka\b|\btrousers?\b|\bpullover\b|\bleggings?\b|\bsweatshirt\b/.test(l)) return 'clothing';
+  if (/\biphone\b|\bipad\b|\bmacbook\b|\blaptop\b|\bheadphones?\b|\bairpods?\b|\bplaystation\b|\bxbox\b|\bnintendo\b|\bgpu\b|\bcpu\b|\bdrone\b/.test(l)) return 'electronics';
+  if (/\blego\b|\bpokémon\b|\bpokemon\b|\bfunko\b|\baction figure\b|\bhot wheels\b/.test(l)) return 'toys';
+  if (/\bvintage\b|\bantique\b|\bcollectible\b|\bmemorabil|\btrading card\b|\bsports card\b/.test(l)) return 'collectibles';
+  if (/\bjewelry\b|\bnecklace\b|\bbracelet\b|\bearrings?\b|\bpendant\b/.test(l)) return 'jewelry';
+  if (/\bvinyl\b|\bdvd\b|\bblu-ray\b|\brecord\b/.test(l)) return 'media';
+  if (/\bskateboard\b|\bsnowboard\b|\bsurfboard\b/.test(l)) return 'sports';
+  if (/\bfurniture\b|\bchandelier\b|\bbedding\b|\bcookware\b/.test(l)) return 'home';
   return null;
 }
 
