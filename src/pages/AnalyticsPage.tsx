@@ -250,6 +250,7 @@ export default function AnalyticsPage() {
                           <img
                             src={saleImg}
                             alt=""
+                            referrerPolicy="no-referrer"
                             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: 4, objectFit: 'cover' }}
                             onError={(e) => { e.currentTarget.style.display = 'none'; }}
                           />

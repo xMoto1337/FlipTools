@@ -491,6 +491,7 @@ export default function CrossListPage() {
                         <img
                           src={listing.images[0]}
                           alt={listing.title}
+                          referrerPolicy="no-referrer"
                           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
@@ -614,7 +615,7 @@ export default function CrossListPage() {
                   }}>
                     <div style={{ position: 'relative', width: 48, height: 48, borderRadius: 6, flexShrink: 0, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                       {listing.images?.[0] && (
-                        <img src={listing.images[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        <img src={listing.images[0]} alt="" referrerPolicy="no-referrer" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                       )}
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
