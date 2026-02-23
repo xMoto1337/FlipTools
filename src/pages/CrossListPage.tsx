@@ -80,7 +80,7 @@ export default function CrossListPage() {
   const [crossListStatus, setCrossListStatus] = useState<Record<string, string>>({});
   const [isCrossListing, setIsCrossListing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   const { allowed: crossListAllowed } = useFeatureGate('cross-list');
   const platforms = getAllPlatforms();
@@ -110,17 +110,26 @@ export default function CrossListPage() {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter((l) => l.title.toLowerCase().includes(q));
     }
-    if (categoryFilter) {
-      filtered = filtered.filter((l) => l.category === categoryFilter);
-    }
     return filtered;
-  }, [listings, searchQuery, categoryFilter]);
+  }, [listings, searchQuery]);
 
-  const categories = useMemo(() => {
-    const cats = new Set<string>();
-    listings.forEach((l) => { if (l.category) cats.add(l.category); });
-    return [...cats].sort();
-  }, [listings]);
+  // Group eligible listings by category; uncategorized goes last
+  const categorizedListings = useMemo(() => {
+    const map = new Map<string, typeof eligibleListings>();
+    for (const l of eligibleListings) {
+      const key = l.category?.trim() || '__uncategorized__';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(l);
+    }
+    // Sort: named categories alphabetically, uncategorized at the end
+    const sorted = new Map<string, typeof eligibleListings>();
+    [...map.keys()]
+      .filter((k) => k !== '__uncategorized__')
+      .sort()
+      .forEach((k) => sorted.set(k, map.get(k)!));
+    if (map.has('__uncategorized__')) sorted.set('__uncategorized__', map.get('__uncategorized__')!);
+    return sorted;
+  }, [eligibleListings]);
 
   const toggleListing = (id: string) => {
     const next = new Set(selectedListings);
@@ -129,13 +138,22 @@ export default function CrossListPage() {
     setSelectedListings(next);
   };
 
-  const selectAllVisible = () => {
-    const allIds = new Set(selectedListings);
-    eligibleListings.forEach((l) => allIds.add(l.id));
-    setSelectedListings(allIds);
+  const deselectAll = () => setSelectedListings(new Set());
+
+  const toggleCategory = (cat: string) => {
+    const next = new Set(expandedCategories);
+    if (next.has(cat)) next.delete(cat);
+    else next.add(cat);
+    setExpandedCategories(next);
   };
 
-  const deselectAll = () => setSelectedListings(new Set());
+  const selectAllInCategory = (catListings: typeof eligibleListings) => {
+    const allSelected = catListings.every((l) => selectedListings.has(l.id));
+    const next = new Set(selectedListings);
+    if (allSelected) catListings.forEach((l) => next.delete(l.id));
+    else catListings.forEach((l) => next.add(l.id));
+    setSelectedListings(next);
+  };
 
   const togglePlatform = (id: PlatformId) => {
     const next = new Set(targetPlatforms);
@@ -201,7 +219,7 @@ export default function CrossListPage() {
     setIsCrossListing(false);
   };
 
-  const allVisibleSelected = eligibleListings.length > 0 && eligibleListings.every((l) => selectedListings.has(l.id));
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   return (
     <div>
@@ -218,186 +236,180 @@ export default function CrossListPage() {
           <div className="card-title">1. Select Listings</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-              {selectedListings.size} of {eligibleListings.length} selected
+              {selectedListings.size > 0
+                ? <span style={{ color: 'var(--neon-green)', fontWeight: 600 }}>{selectedListings.size} selected</span>
+                : `${eligibleListings.length} listings`}
             </span>
-            <button className="btn btn-sm btn-secondary" onClick={allVisibleSelected ? deselectAll : selectAllVisible}>
-              {allVisibleSelected ? 'Deselect All' : 'Select All'}
-            </button>
+            {selectedListings.size > 0 && (
+              <button className="btn btn-sm btn-secondary" onClick={deselectAll} style={{ fontSize: 12 }}>
+                Clear All
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Search & Filter */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        {/* Search bar */}
+        <div style={{ marginBottom: 14 }}>
           <input
             type="text"
             className="form-input"
             placeholder="Search listings..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ flex: 1 }}
           />
-          {categories.length > 0 && (
-            <select
-              className="form-input"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              style={{ width: 160 }}
-            >
-              <option value="">All Categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          )}
         </div>
 
         {eligibleListings.length === 0 ? (
           <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 24 }}>
-            {searchQuery || categoryFilter ? 'No listings match your filters.' : 'No listings available. Create some listings first.'}
+            {searchQuery ? 'No listings match your search.' : 'No listings available. Create some listings first.'}
           </p>
         ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 12,
-            maxHeight: 480,
-            overflowY: 'auto',
-            padding: 4,
-          }}>
-            {eligibleListings.map((listing) => {
-              const isSelected = selectedListings.has(listing.id);
-              const existingPlatforms = Object.keys(listing.platforms);
-              const statusEntries = [...targetPlatforms].map((p) => ({
-                platform: p,
-                status: crossListStatus[`${listing.id}-${p}`],
-                alreadyListed: !!listing.platforms[p],
-              }));
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 560, overflowY: 'auto', paddingRight: 2 }}>
+            {[...categorizedListings.entries()].map(([cat, catListings]) => {
+              const label = cat === '__uncategorized__' ? 'Uncategorized' : capitalize(cat);
+              const isOpen = searchQuery ? true : expandedCategories.has(cat);
+              const selectedInCat = catListings.filter((l) => selectedListings.has(l.id)).length;
+              const allInCatSelected = catListings.every((l) => selectedListings.has(l.id));
 
               return (
-                <div
-                  key={listing.id}
-                  onClick={requireAuth(() => toggleListing(listing.id), 'Sign in to cross-list items')}
-                  style={{
-                    display: 'flex',
-                    gap: 12,
-                    padding: 12,
-                    borderRadius: 10,
-                    cursor: 'pointer',
-                    border: isSelected ? '2px solid var(--neon-green)' : '2px solid var(--border)',
-                    background: isSelected ? 'color-mix(in srgb, var(--neon-green) 5%, var(--bg-card))' : 'var(--bg-card)',
-                    transition: 'all 0.15s ease',
-                    position: 'relative',
-                  }}
-                >
-                  {/* Checkbox */}
-                  <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 1 }}>
-                    <input
-                      type="checkbox"
-                      className="table-checkbox"
-                      checked={isSelected}
-                      onChange={() => {}}
-                      style={{ pointerEvents: 'none' }}
-                    />
-                  </div>
+                <div key={cat} style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                  {/* Folder header */}
+                  <div
+                    onClick={() => toggleCategory(cat)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 14px', cursor: 'pointer',
+                      background: isOpen ? 'var(--bg-hover)' : 'var(--bg-card)',
+                      transition: 'background 0.15s',
+                      userSelect: 'none',
+                    }}
+                    onMouseEnter={(e) => { if (!isOpen) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                    onMouseLeave={(e) => { if (!isOpen) e.currentTarget.style.background = 'var(--bg-card)'; }}
+                  >
+                    {/* Chevron */}
+                    <svg
+                      width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="var(--text-muted)" strokeWidth="2.5"
+                      style={{ flexShrink: 0, transition: 'transform 0.2s', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
 
-                  {/* Thumbnail */}
-                  <div style={{
-                    width: 80,
-                    height: 80,
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    flexShrink: 0,
-                    background: 'var(--bg-hover)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}>
-                    {listing.images && listing.images.length > 0 ? (
-                      <img
-                        src={listing.images[0]}
-                        alt={listing.title}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                    ) : (
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
-                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                        <circle cx="8.5" cy="8.5" r="1.5" />
-                        <path d="M21 15l-5-5L5 21" />
-                      </svg>
-                    )}
-                  </div>
+                    {/* Folder icon */}
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" strokeWidth="2" style={{ flexShrink: 0 }}>
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    </svg>
 
-                  {/* Details */}
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{
-                      fontWeight: 600,
-                      fontSize: 14,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                    {/* Category name */}
+                    <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{label}</span>
+
+                    {/* Count badge */}
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                      background: 'var(--bg-tertiary)', color: 'var(--text-muted)',
                     }}>
-                      {listing.title}
-                    </div>
+                      {catListings.length}
+                    </span>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: 'var(--neon-green)', fontWeight: 700, fontSize: 15 }}>
-                        {formatCurrency(listing.price || 0)}
+                    {/* Selected count */}
+                    {selectedInCat > 0 && (
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                        background: 'color-mix(in srgb, var(--neon-green) 15%, transparent)',
+                        color: 'var(--neon-green)',
+                      }}>
+                        {selectedInCat} selected
                       </span>
-                      {listing.condition && (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
-                          {listing.condition}
-                        </span>
-                      )}
-                    </div>
-
-                    {listing.category && (
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {listing.category}
-                      </div>
                     )}
 
-                    {/* Current platforms */}
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
-                      {existingPlatforms.map((p) => (
-                        <span key={p} style={{
-                          fontSize: 10,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: `color-mix(in srgb, ${PLATFORM_COLORS[p] || '#888'} 15%, transparent)`,
-                          color: PLATFORM_COLORS[p] || '#888',
-                          fontWeight: 600,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px',
-                        }}>
-                          {p}
-                        </span>
-                      ))}
-                      {existingPlatforms.length === 0 && (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Not listed anywhere</span>
-                      )}
-                    </div>
-
-                    {/* Cross-list status for this item */}
-                    {statusEntries.some((s) => s.status) && (
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                        {statusEntries.filter((s) => s.status).map((s) => (
-                          <span key={s.platform} style={{
-                            fontSize: 10,
-                            padding: '1px 5px',
-                            borderRadius: 3,
-                            background: s.status === 'Success' ? 'color-mix(in srgb, var(--neon-green) 15%, transparent)'
-                              : s.status === 'Listing...' ? 'color-mix(in srgb, var(--neon-blue) 15%, transparent)'
-                              : 'color-mix(in srgb, var(--neon-orange) 15%, transparent)',
-                            color: s.status === 'Success' ? 'var(--neon-green)'
-                              : s.status === 'Listing...' ? 'var(--neon-blue)'
-                              : 'var(--neon-orange)',
-                          }}>
-                            {s.platform}: {s.status}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {/* Select / Deselect all in category */}
+                    <button
+                      className="btn btn-sm btn-secondary"
+                      onClick={(e) => { e.stopPropagation(); selectAllInCategory(catListings); }}
+                      style={{ fontSize: 11, padding: '2px 10px', flexShrink: 0 }}
+                    >
+                      {allInCatSelected ? 'Deselect All' : 'Select All'}
+                    </button>
                   </div>
+
+                  {/* Listing cards grid */}
+                  {isOpen && (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                      gap: 10,
+                      padding: 12,
+                      borderTop: '1px solid var(--border)',
+                      background: 'var(--bg-card)',
+                    }}>
+                      {catListings.map((listing) => {
+                        const isSelected = selectedListings.has(listing.id);
+                        const existingPlatforms = Object.keys(listing.platforms);
+                        const statusEntries = [...targetPlatforms].map((p) => ({
+                          platform: p,
+                          status: crossListStatus[`${listing.id}-${p}`],
+                          alreadyListed: !!listing.platforms[p],
+                        }));
+
+                        return (
+                          <div
+                            key={listing.id}
+                            onClick={requireAuth(() => toggleListing(listing.id), 'Sign in to cross-list items')}
+                            style={{
+                              display: 'flex', gap: 10, padding: 10, borderRadius: 8, cursor: 'pointer',
+                              border: isSelected ? '2px solid var(--neon-green)' : '2px solid var(--border)',
+                              background: isSelected ? 'color-mix(in srgb, var(--neon-green) 5%, var(--bg-hover))' : 'var(--bg-hover)',
+                              transition: 'all 0.15s ease', position: 'relative',
+                            }}
+                          >
+                            {/* Checkbox */}
+                            <div style={{ position: 'absolute', top: 7, left: 7, zIndex: 1 }}>
+                              <input type="checkbox" className="table-checkbox" checked={isSelected} onChange={() => {}} style={{ pointerEvents: 'none' }} />
+                            </div>
+
+                            {/* Thumbnail */}
+                            <div style={{ width: 72, height: 72, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {listing.images?.[0] ? (
+                                <img src={listing.images[0]} alt={listing.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+                                </svg>
+                              )}
+                            </div>
+
+                            {/* Details */}
+                            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {listing.title}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: 'var(--neon-green)', fontWeight: 700, fontSize: 14 }}>{formatCurrency(listing.price || 0)}</span>
+                                {listing.condition && <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{listing.condition}</span>}
+                              </div>
+                              {/* Current platforms */}
+                              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 1 }}>
+                                {existingPlatforms.map((p) => (
+                                  <span key={p} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `color-mix(in srgb, ${PLATFORM_COLORS[p] || '#888'} 15%, transparent)`, color: PLATFORM_COLORS[p] || '#888', fontWeight: 600, textTransform: 'uppercase' }}>{p}</span>
+                                ))}
+                                {existingPlatforms.length === 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Not listed anywhere</span>}
+                              </div>
+                              {/* Cross-list status */}
+                              {statusEntries.some((s) => s.status) && (
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  {statusEntries.filter((s) => s.status).map((s) => (
+                                    <span key={s.platform} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: s.status === 'Success' ? 'color-mix(in srgb, var(--neon-green) 15%, transparent)' : s.status === 'Listing...' ? 'color-mix(in srgb, var(--neon-blue) 15%, transparent)' : 'color-mix(in srgb, var(--neon-orange) 15%, transparent)', color: s.status === 'Success' ? 'var(--neon-green)' : s.status === 'Listing...' ? 'var(--neon-blue)' : 'var(--neon-orange)' }}>
+                                      {s.platform}: {s.status}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
