@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { useAuth } from './hooks/useAuth';
 import AppLayout from './components/Layout/AppLayout';
 
@@ -22,30 +23,33 @@ export default function App() {
   useAuth();
 
   return (
-    <Routes>
-      {/* Auth page */}
-      <Route path="/auth" element={<AuthPage />} />
-      <Route path="/auth/callback" element={<AuthCallbackHandler />} />
+    <>
+      <Routes>
+        {/* Auth page */}
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/auth/callback" element={<AuthCallbackHandler />} />
 
-      {/* All routes accessible without login */}
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/listings" element={<ListingsPage />} />
-        <Route path="/cross-list" element={<CrossListPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/research" element={<ResearchPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/pricing" element={<PricingPage />} />
-        <Route path="/payment-success" element={<PaymentSuccessPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="/ebay/callback" element={<EbayCallbackPage />} />
-        <Route path="/auth/etsy/callback" element={<EtsyCallbackPage />} />
-      </Route>
+        {/* All routes accessible without login */}
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/listings" element={<ListingsPage />} />
+          <Route path="/cross-list" element={<CrossListPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/research" element={<ResearchPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/payment-success" element={<PaymentSuccessPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/ebay/callback" element={<EbayCallbackPage />} />
+          <Route path="/auth/etsy/callback" element={<EtsyCallbackPage />} />
+        </Route>
 
-      {/* Catch-all redirect */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        {/* Catch-all redirect */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <Analytics />
+    </>
   );
 }
 
