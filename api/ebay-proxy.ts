@@ -153,6 +153,7 @@ function parseGetMyeBaySelling(xml: string): {
     status: string;
     startTime: string;
     conditionDisplayName: string;
+    categoryName: string;
   }>;
   totalEntries: number;
   totalPages: number;
@@ -170,6 +171,7 @@ function parseGetMyeBaySelling(xml: string): {
     status: string;
     startTime: string;
     conditionDisplayName: string;
+    categoryName: string;
   }> = [];
 
   // Extract ActiveList section
@@ -209,6 +211,10 @@ function parseGetMyeBaySelling(xml: string): {
     const galleryMatch = itemXml.match(/<GalleryURL>([^<]+)<\/GalleryURL>/);
     const galleryUrl = galleryMatch ? galleryMatch[1] : '';
 
+    // Extract PrimaryCategory > CategoryName specifically (not SecondaryCategory)
+    const primaryCatMatch = itemXml.match(/<PrimaryCategory>[\s\S]*?<CategoryName>([^<]+)<\/CategoryName>/);
+    const categoryName = primaryCatMatch ? decodeXmlEntities(primaryCatMatch[1].trim()) : '';
+
     items.push({
       itemId: get('ItemID'),
       title: decodeXmlEntities(get('Title')),
@@ -222,6 +228,7 @@ function parseGetMyeBaySelling(xml: string): {
       status: get('ListingStatus') || 'Active',
       startTime: get('StartTime'),
       conditionDisplayName: get('ConditionDisplayName'),
+      categoryName,
     });
   }
 

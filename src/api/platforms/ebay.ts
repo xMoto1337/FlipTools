@@ -17,6 +17,21 @@ const EBAY_AUTH_URL = IS_SANDBOX
   ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
   : 'https://auth.ebay.com/oauth2/authorize';
 
+// Map eBay's PrimaryCategory name to our internal category keys
+function normalizeEbayCategory(ebayCategory: string): string {
+  const l = ebayCategory.toLowerCase();
+  if (/shoe|sneaker|boot|sandal|footwear|heel|slipper/.test(l)) return 'shoes';
+  if (/cloth|shirt|pant|jacket|dress|apparel|coat|sweater|hoodie|jeans|tee|top|bottom|skirt|suit|vest|blouse|swimwear|underwear/.test(l)) return 'clothing';
+  if (/electron|phone|computer|laptop|tablet|camera|audio|headphone|speaker|console|gaming|video game|tv|monitor/.test(l)) return 'electronics';
+  if (/toy|doll|lego|puzzle|action figure|stuffed/.test(l)) return 'toys';
+  if (/collectible|vintage|antique|coin|stamp|trading card|memorabilia|figurine|sports card/.test(l)) return 'collectibles';
+  if (/home|garden|kitchen|furniture|decor|bedding|tool|appliance|bath|lamp|rug|outdoor/.test(l)) return 'home';
+  if (/jewelry|watch|necklace|bracelet|ring|earring/.test(l)) return 'jewelry';
+  if (/book|music|dvd|movie|blu.ray|vinyl|cd/.test(l)) return 'media';
+  if (/sport|fitness|gym|cycling|golf|soccer|football|baseball|basketball/.test(l)) return 'sports';
+  return 'other';
+}
+
 function escapeXml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -296,6 +311,7 @@ export const ebayAdapter: PlatformAdapter = {
           quantity: item.quantityAvailable || item.quantity || 1,
           images,
           condition: item.conditionDisplayName || '',
+          category: item.categoryName ? normalizeEbayCategory(item.categoryName) : undefined,
           createdAt: item.startTime || undefined,
           platformData: {
             listingType: item.listingType,

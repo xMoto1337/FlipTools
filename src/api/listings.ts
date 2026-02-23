@@ -260,6 +260,7 @@ export const listingsApi = {
               platforms: platformInfo,
               createdAt: item.createdAt,
               condition: item.condition || undefined,
+              category: item.category || undefined,
             });
           } else {
             // Insert new listing — use eBay startTime as created_at if available
@@ -307,6 +308,7 @@ export const listingsApi = {
           if (item.images !== undefined) updates.images = item.images;
           if (item.createdAt) updates.created_at = item.createdAt;
           if (item.condition) updates.condition = item.condition;
+          if (item.category) updates.category = item.category;
 
           const { error: updateErr } = await supabase
             .from('listings')
