@@ -1,17 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+type FlipSourceId = 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
 interface FlipSource {
   id: string;
   title: string;
   buyPrice: number;
   image: string;
   url: string;
-  source: 'aliexpress' | 'dhgate';
+  source: FlipSourceId;
   minOrder: number;
   shippingDesc: string;
   rating?: number;
   totalOrders?: number;
 }
+const FF_SOURCES: { id: FlipSourceId; label: string; color: string; bg: string; border: string }[] = [
+  { id: 'aliexpress', label: 'AliExpress', color: '#ff6600', bg: 'rgba(255,102,0,0.15)', border: '#ff660055' },
+  { id: 'dhgate',     label: 'DHgate',     color: 'var(--neon-cyan)', bg: 'rgba(0,180,255,0.12)', border: 'rgba(0,180,255,0.3)' },
+  { id: 'wish',       label: 'Wish',       color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)' },
+  { id: 'temu',       label: 'Temu',       color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)' },
+  { id: 'shein',      label: 'Shein',      color: '#ff69b4', bg: 'rgba(255,105,180,0.12)', border: 'rgba(255,105,180,0.3)' },
+];
 import { useDropzone } from 'react-dropzone';
 import { usePlatformStore } from '../stores/platformStore';
 import { useResearchStore } from '../stores/researchStore';
@@ -219,7 +227,7 @@ export default function ResearchPage() {
   // ── Flip Finder state ──────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'comps' | 'flipfinder'>('comps');
   const [ffQuery, setFfQuery] = useState('');
-  const [ffSources, setFfSources] = useState<Record<string, boolean>>({ aliexpress: true, dhgate: true });
+  const [ffSources, setFfSources] = useState<Record<string, boolean>>({ aliexpress: true, dhgate: true, wish: true, temu: true, shein: true });
   const [ffMaxBuy, setFfMaxBuy] = useState('');
   const [ffMinRoi, setFfMinRoi] = useState('');
   const [ffSort, setFfSort] = useState<'score' | 'roi' | 'profit' | 'demand'>('score');
@@ -544,61 +552,72 @@ export default function ResearchPage() {
               </button>
             </div>
 
-            {/* Source toggles + filters */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources:</span>
-                {(['aliexpress', 'dhgate'] as const).map((src) => (
-                  <button
-                    key={src}
-                    onClick={() => setFfSources((p) => ({ ...p, [src]: !p[src] }))}
+            {/* Source toggles */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sources</span>
+              {FF_SOURCES.map((src) => {
+                const on = ffSources[src.id];
+                return (
+                  <button key={src.id} onClick={() => setFfSources((p) => ({ ...p, [src.id]: !p[src.id] }))}
                     style={{
-                      padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
-                      background: ffSources[src] ? (src === 'aliexpress' ? 'rgba(255,102,0,0.15)' : 'rgba(0,180,255,0.12)') : 'transparent',
-                      borderColor: ffSources[src] ? (src === 'aliexpress' ? '#ff6600' : 'var(--neon-cyan)') : 'var(--border-color)',
-                      color: ffSources[src] ? (src === 'aliexpress' ? '#ff6600' : 'var(--neon-cyan)') : 'var(--text-muted)',
+                      padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
+                      background: on ? src.bg : 'transparent',
+                      borderColor: on ? src.border : 'var(--border-color)',
+                      color: on ? src.color : 'var(--text-muted)',
+                      transition: 'all 0.15s',
+                      display: 'flex', alignItems: 'center', gap: 5,
                     }}
                   >
-                    {src === 'aliexpress' ? 'AliExpress' : 'DHgate'}
+                    {on && <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6L9 17l-5-5"/></svg>}
+                    {src.label}
                   </button>
-                ))}
-              </div>
+                );
+              })}
+            </div>
 
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Max Buy
+            {/* Filters row */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Max Buy */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Max Buy Price</span>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden', height: 34 }}>
+                  <span style={{ padding: '0 8px', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, borderRight: '1px solid var(--border-color)', height: '100%', display: 'flex', alignItems: 'center' }}>$</span>
                   <input
-                    type="number" min="0" placeholder="any"
+                    type="number" min="0" placeholder="Any"
                     value={ffMaxBuy}
                     onChange={(e) => setFfMaxBuy(e.target.value)}
-                    style={{ width: 68, padding: '3px 8px', borderRadius: 6, background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 12 }}
+                    style={{ width: 72, padding: '0 10px', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13 }}
                   />
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Min ROI
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <input
-                      type="number" min="0" placeholder="0"
-                      value={ffMinRoi}
-                      onChange={(e) => setFfMinRoi(e.target.value)}
-                      style={{ width: 68, padding: '3px 24px 3px 8px', borderRadius: 6, background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 12 }}
-                    />
-                    <span style={{ position: 'absolute', right: 7, fontSize: 11, color: 'var(--text-muted)', pointerEvents: 'none' }}>%</span>
-                  </div>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Sort
-                  <select
-                    value={ffSort}
-                    onChange={(e) => setFfSort(e.target.value as typeof ffSort)}
-                    style={{ padding: '3px 8px', borderRadius: 6, background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 12, cursor: 'pointer' }}
-                  >
-                    <option value="score">Best Score</option>
-                    <option value="roi">Best ROI</option>
-                    <option value="profit">Best Profit</option>
-                    <option value="demand">Most Demand</option>
-                  </select>
-                </label>
+                </div>
+              </div>
+
+              {/* Min ROI */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Min ROI</span>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden', height: 34 }}>
+                  <input
+                    type="number" min="0" placeholder="0"
+                    value={ffMinRoi}
+                    onChange={(e) => setFfMinRoi(e.target.value)}
+                    style={{ width: 72, padding: '0 0 0 10px', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13 }}
+                  />
+                  <span style={{ padding: '0 8px', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, borderLeft: '1px solid var(--border-color)', height: '100%', display: 'flex', alignItems: 'center' }}>%</span>
+                </div>
+              </div>
+
+              {/* Sort */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sort By</span>
+                <select
+                  value={ffSort}
+                  onChange={(e) => setFfSort(e.target.value as typeof ffSort)}
+                  style={{ height: 34, padding: '0 10px', borderRadius: 8, background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer', outline: 'none' }}
+                >
+                  <option value="score">Best Score</option>
+                  <option value="roi">Best ROI</option>
+                  <option value="profit">Best Profit</option>
+                  <option value="demand">Most Demand</option>
+                </select>
               </div>
             </div>
           </div>
@@ -684,14 +703,11 @@ export default function ResearchPage() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>{item.title}</div>
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                                  <span style={{
-                                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', letterSpacing: '0.04em',
-                                    background: item.source === 'aliexpress' ? 'rgba(255,102,0,0.15)' : 'rgba(0,180,255,0.12)',
-                                    color: item.source === 'aliexpress' ? '#ff6600' : 'var(--neon-cyan)',
-                                    border: `1px solid ${item.source === 'aliexpress' ? '#ff660055' : 'rgba(0,180,255,0.3)'}`,
-                                  }}>
-                                    {item.source === 'aliexpress' ? 'AliExpress' : 'DHgate'}
-                                  </span>
+                                  {(() => { const s = FF_SOURCES.find((x) => x.id === item.source); return s ? (
+                                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', letterSpacing: '0.04em', background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>
+                                      {s.label}
+                                    </span>
+                                  ) : null; })()}
                                   {item.minOrder > 1 && (
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', padding: '2px 6px', borderRadius: 10, border: '1px solid var(--border-color)' }}>
                                       Min {item.minOrder}
@@ -788,7 +804,7 @@ export default function ResearchPage() {
                               <a href={item.url} target="_blank" rel="noopener noreferrer"
                                 style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}
                               >
-                                View on {item.source === 'aliexpress' ? 'AliExpress' : 'DHgate'}
+                                View on {FF_SOURCES.find((x) => x.id === item.source)?.label ?? item.source}
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                               </a>
                               <button
@@ -876,7 +892,7 @@ export default function ResearchPage() {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(s.buyPrice)} on {s.source === 'aliexpress' ? 'AliExpress' : 'DHgate'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(s.buyPrice)} on {FF_SOURCES.find((x) => x.id === s.source)?.label ?? s.source}</div>
                     </div>
                     <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--neon-cyan)', textDecoration: 'none', flexShrink: 0 }}>View ↗</a>
                     <button onClick={() => toggleSaved(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, flexShrink: 0 }}>
