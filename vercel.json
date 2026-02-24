@@ -25,6 +25,9 @@
     },
     "api/ebay-auth.ts": {
       "maxDuration": 10
+    },
+    "api/flip-finder.ts": {
+      "maxDuration": 30
     }
   }
 }
