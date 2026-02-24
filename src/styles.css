@@ -2406,3 +2406,31 @@ a:hover {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ===== Flip Finder ===== */
+.ff-card {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ff-card:hover {
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+}
+
+.ff-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ff-stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.ff-stat-value {
+  font-size: 14px;
+  font-weight: 700;
+}
