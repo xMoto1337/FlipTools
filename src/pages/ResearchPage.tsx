@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-type FlipSourceId = 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
+type FlipSourceId = 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein' | 'ebay';
 interface FlipSource {
   id: string;
   title: string;
@@ -19,6 +19,7 @@ const FF_SOURCES: { id: FlipSourceId; label: string; color: string; bg: string; 
   { id: 'wish',       label: 'Wish',       color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)' },
   { id: 'temu',       label: 'Temu',       color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)' },
   { id: 'shein',      label: 'Shein',      color: '#ff69b4', bg: 'rgba(255,105,180,0.12)', border: 'rgba(255,105,180,0.3)' },
+  { id: 'ebay',       label: 'eBay BIN',   color: '#e53238', bg: 'rgba(229,50,56,0.12)',   border: 'rgba(229,50,56,0.3)' },
 ];
 import { useDropzone } from 'react-dropzone';
 import { usePlatformStore } from '../stores/platformStore';
@@ -227,7 +228,7 @@ export default function ResearchPage() {
   // ── Flip Finder state ──────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'comps' | 'flipfinder'>('comps');
   const [ffQuery, setFfQuery] = useState('');
-  const [ffSources, setFfSources] = useState<Record<string, boolean>>({ aliexpress: true, dhgate: true, wish: true, temu: true, shein: true });
+  const [ffSources, setFfSources] = useState<Record<string, boolean>>({ aliexpress: true, dhgate: true, wish: true, temu: true, shein: true, ebay: true });
   const [ffMaxBuy, setFfMaxBuy] = useState('');
   const [ffMinRoi, setFfMinRoi] = useState('');
   const [ffSort, setFfSort] = useState<'score' | 'roi' | 'profit' | 'demand'>('score');
@@ -236,6 +237,7 @@ export default function ResearchPage() {
   const [ffEbaySold, setFfEbaySold] = useState<{ title: string; price: number }[]>([]);
   const [ffError, setFfError] = useState<string | null>(null);
   const [ffSearched, setFfSearched] = useState(false);
+  const [ffSourceStatus, setFfSourceStatus] = useState<Record<string, 'ok' | 'empty' | 'error'>>({});
   const [ffSaved, setFfSaved] = useState<FlipSource[]>(() => {
     try { return JSON.parse(localStorage.getItem('ft_ff_saved') || '[]'); } catch { return []; }
   });
@@ -298,15 +300,25 @@ export default function ResearchPage() {
     setFfSearched(true);
     setFfWholesale([]);
     setFfEbaySold([]);
+    setFfSourceStatus({});
 
-    const activeSources = Object.entries(ffSources)
-      .filter(([, v]) => v)
+    // Wholesale sources (exclude eBay — handled separately below)
+    const wholesaleSources = Object.entries(ffSources)
+      .filter(([id, v]) => v && id !== 'ebay')
       .map(([k]) => k)
-      .join(',') || 'all';
+      .join(',');
+
+    const ebayToken = getToken('ebay');
+    const maxBuyNum = parseFloat(ffMaxBuy) || 0;
 
     try {
-      const [wholesaleRes, ebayRes] = await Promise.allSettled([
-        fetch(`/api/flip-finder?q=${encodeURIComponent(q)}&source=${activeSources}`).then((r) => r.json()),
+      const [wholesaleRes, ebayCompsRes, ebayBinRes] = await Promise.allSettled([
+        // 1. Wholesale sources (AliExpress, DHgate, Wish, Temu, Shein via serverless)
+        wholesaleSources
+          ? fetch(`/api/flip-finder?q=${encodeURIComponent(q)}&source=${wholesaleSources}`).then((r) => r.json())
+          : Promise.resolve({ results: [], sourceStatus: {} }),
+
+        // 2. eBay sold comps (for sell-side price comparison)
         (async () => {
           if (!hasConnectedPlatform) return [];
           const all: { title: string; price: number }[] = [];
@@ -318,14 +330,93 @@ export default function ResearchPage() {
           }
           return all;
         })(),
+
+        // 3. eBay cheap BIN listings (buy-side) — always works when eBay is connected
+        (async (): Promise<FlipSource[]> => {
+          if (!ffSources['ebay'] || !ebayToken) return [];
+          try {
+            const filterParts = ['buyingOptions:{FIXED_PRICE}', 'priceCurrency:USD'];
+            if (maxBuyNum > 0) filterParts.push(`price:[0.01..${maxBuyNum}]`);
+            const params = new URLSearchParams({
+              q,
+              filter: filterParts.join(','),
+              sort: 'price',
+              limit: '40',
+            });
+            const res = await fetch('/api/ebay-proxy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                endpoint: `/buy/browse/v1/item_summary/search?${params}`,
+                token: ebayToken,
+                method: 'GET',
+              }),
+            });
+            if (!res.ok) return [];
+            const data = await res.json();
+            return ((data.itemSummaries || []) as Record<string, unknown>[])
+              .flatMap<FlipSource>((item) => {
+                const price = parseFloat(String((item.price as Record<string, unknown>)?.value || '0'));
+                if (price <= 0) return [];
+                const imgs = (item.thumbnailImages as Record<string, string>[] | undefined) || [];
+                const img = imgs[0]?.imageUrl || (item.image as Record<string, string>)?.imageUrl || '';
+                const shippingOpts = (item.shippingOptions as Record<string, unknown>[]) || [];
+                const firstShip = shippingOpts[0] || {};
+                const freeShip =
+                  (firstShip.shippingCostType as string) === 'FREE' ||
+                  parseFloat(String((firstShip.shippingCost as Record<string, string>)?.value || '1')) === 0;
+                return [{
+                  id: `ebay-${String(item.itemId || Math.random())}`,
+                  title: String(item.title || 'Unknown').slice(0, 120),
+                  buyPrice: price,
+                  image: img,
+                  url: String(item.itemWebUrl || ''),
+                  source: 'ebay' as FlipSourceId,
+                  minOrder: 1,
+                  shippingDesc: freeShip ? 'Free Shipping' : 'Shipping varies',
+                }];
+              });
+          } catch {
+            return [];
+          }
+        })(),
       ]);
 
+      const newStatus: Record<string, 'ok' | 'empty' | 'error'> = {};
+      const allBuySide: FlipSource[] = [];
+
+      // Merge wholesale results + their reported source statuses
       if (wholesaleRes.status === 'fulfilled') {
-        setFfWholesale((wholesaleRes.value as { results: FlipSource[] }).results ?? []);
+        const wData = wholesaleRes.value as { results?: FlipSource[]; sourceStatus?: Record<string, string> };
+        const wItems = wData.results ?? [];
+        allBuySide.push(...wItems);
+        for (const [src, st] of Object.entries(wData.sourceStatus ?? {})) {
+          newStatus[src] = st as 'ok' | 'empty' | 'error';
+        }
+        // Fill in empty for any wholesale source not mentioned in the response
+        wholesaleSources.split(',').filter(Boolean).forEach((s) => {
+          if (!newStatus[s]) newStatus[s] = wItems.some((i) => i.source === s) ? 'ok' : 'empty';
+        });
+      } else {
+        wholesaleSources.split(',').filter(Boolean).forEach((s) => { newStatus[s] = 'error'; });
       }
-      if (ebayRes.status === 'fulfilled') {
-        setFfEbaySold(ebayRes.value as { title: string; price: number }[]);
+
+      // Merge eBay BIN results
+      if (ebayBinRes.status === 'fulfilled') {
+        const ebayItems = ebayBinRes.value as FlipSource[];
+        allBuySide.push(...ebayItems);
+        newStatus['ebay'] = ebayItems.length > 0 ? 'ok' : 'empty';
+      } else {
+        newStatus['ebay'] = 'error';
       }
+
+      if (ebayCompsRes.status === 'fulfilled') {
+        setFfEbaySold(ebayCompsRes.value as { title: string; price: number }[]);
+      }
+
+      allBuySide.sort((a, b) => a.buyPrice - b.buyPrice);
+      setFfWholesale(allBuySide);
+      setFfSourceStatus(newStatus);
     } catch (err) {
       console.error('[FlipFinder]', err);
       setFfError('Search failed. Please try again.');
@@ -644,7 +735,7 @@ export default function ResearchPage() {
           {ffLoading && (
             <div style={{ padding: '48px 0', textAlign: 'center' }}>
               <div className="spinner" style={{ margin: '0 auto 12px' }} />
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Scanning AliExpress &amp; DHgate, pulling eBay comps…</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Scanning sources &amp; pulling eBay comps…</div>
             </div>
           )}
 
@@ -837,13 +928,32 @@ export default function ResearchPage() {
                   </div>
                 </>
               ) : ffWholesale.length === 0 ? (
-                /* No wholesale results */
+                /* No buy-side results */
                 <div className="card" style={{ padding: '40px 20px', textAlign: 'center', marginBottom: 24 }}>
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" style={{ marginBottom: 12 }}>
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                   </svg>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 4 }}>No wholesale results found for "{ffQuery}"</p>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>Try a more general keyword, or AliExpress/DHgate may be temporarily unavailable.</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8 }}>No buy-side listings found for "{ffQuery}"</p>
+                  {!isConnected('ebay') && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>
+                      <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Connect eBay</Link> to search cheap eBay BIN listings as your buy source — this is the most reliable data source.
+                    </p>
+                  )}
+                  {isConnected('ebay') && !ffSources['ebay'] && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>
+                      Enable the <strong style={{ color: '#e53238' }}>eBay BIN</strong> source above to find cheap eBay listings to buy and resell.
+                    </p>
+                  )}
+                  {Object.values(ffSourceStatus).some((s) => s === 'ok' || s === 'empty') && (
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+                      {Object.entries(ffSourceStatus).map(([src, st]) => (
+                        <span key={src} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: st === 'ok' ? 'rgba(0,255,65,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${st === 'ok' ? 'rgba(0,255,65,0.3)' : 'var(--border-color)'}`, color: st === 'ok' ? 'var(--neon-green)' : 'var(--text-muted)' }}>
+                          {src} {st === 'ok' ? '✓' : st === 'error' ? '✗' : '—'}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 10 }}>Try a broader keyword like "led" or "phone case".</p>
                 </div>
               ) : (
                 /* Wholesale found but all filtered out */
@@ -862,7 +972,7 @@ export default function ResearchPage() {
               </svg>
               <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Find products to flip for profit</div>
               <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 380, margin: '0 auto 20px' }}>
-                Search any product keyword. Flip Finder scans AliExpress &amp; DHgate for cheap source prices, then cross-references eBay sold comps to calculate your estimated ROI.
+                Search any product keyword. Flip Finder pulls cheap eBay BIN listings + wholesale sources (AliExpress, DHgate, Wish, Temu, Shein), then cross-references eBay sold comps to calculate your estimated ROI.
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {['led strip lights', 'phone stand', 'bluetooth speaker', 'fidget toy', 'cable organizer'].map((ex) => (
