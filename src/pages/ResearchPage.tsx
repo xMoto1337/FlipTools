@@ -237,6 +237,9 @@ export default function ResearchPage() {
   const [ffError, setFfError] = useState<string | null>(null);
   const [ffSearched, setFfSearched] = useState(false);
   const [ffSourceStatus, setFfSourceStatus] = useState<Record<string, 'ok' | 'empty' | 'error'>>({});
+  const [ffSourceErrors, setFfSourceErrors] = useState<Record<string, string>>({});
+  const [ffHasScraperKey, setFfHasScraperKey] = useState<boolean | null>(null);
+  const [ffShowDebug, setFfShowDebug] = useState(false);
   const [ffSaved, setFfSaved] = useState<FlipSource[]>(() => {
     try { return JSON.parse(localStorage.getItem('ft_ff_saved') || '[]'); } catch { return []; }
   });
@@ -300,6 +303,8 @@ export default function ResearchPage() {
     setFfWholesale([]);
     setFfEbaySold([]);
     setFfSourceStatus({});
+    setFfSourceErrors({});
+    setFfShowDebug(false);
 
     const activeSources = Object.entries(ffSources)
       .filter(([, v]) => v)
@@ -328,9 +333,13 @@ export default function ResearchPage() {
       const newStatus: Record<string, 'ok' | 'empty' | 'error'> = {};
 
       if (wholesaleRes.status === 'fulfilled') {
-        const wData = wholesaleRes.value as { results?: FlipSource[]; sourceStatus?: Record<string, string>; sourceErrors?: Record<string, string> };
+        const wData = wholesaleRes.value as {
+          results?: FlipSource[];
+          sourceStatus?: Record<string, string>;
+          sourceErrors?: Record<string, string>;
+          hasScraperKey?: boolean;
+        };
         const wItems = wData.results ?? [];
-        // Merge per-source status reported by the API
         for (const [src, st] of Object.entries(wData.sourceStatus ?? {})) {
           newStatus[src] = st as 'ok' | 'empty' | 'error';
         }
@@ -339,9 +348,11 @@ export default function ResearchPage() {
         });
         wItems.sort((a, b) => a.buyPrice - b.buyPrice);
         setFfWholesale(wItems);
+        setFfSourceErrors(wData.sourceErrors ?? {});
+        if (wData.hasScraperKey !== undefined) setFfHasScraperKey(wData.hasScraperKey);
       } else {
         activeSources.split(',').filter(Boolean).forEach((s) => { newStatus[s] = 'error'; });
-        setFfError('Could not reach wholesale sources. They may be temporarily blocking automated requests.');
+        setFfError('Wholesale API request failed — the function may have timed out.');
       }
 
       if (ebayCompsRes.status === 'fulfilled') {
@@ -861,31 +872,68 @@ export default function ResearchPage() {
                 </>
               ) : ffWholesale.length === 0 ? (
                 /* No buy-side results */
-                <div className="card" style={{ padding: '40px 20px', textAlign: 'center', marginBottom: 24 }}>
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" style={{ marginBottom: 12 }}>
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                  </svg>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8 }}>No buy-side listings found for "{ffQuery}"</p>
-                  {!isConnected('ebay') && (
-                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>
-                      <Link to="/settings" style={{ color: 'var(--neon-cyan)' }}>Connect eBay</Link> to search cheap eBay BIN listings as your buy source — this is the most reliable data source.
-                    </p>
-                  )}
-                  {isConnected('ebay') && !ffSources['ebay'] && (
-                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>
-                      Enable the <strong style={{ color: '#e53238' }}>eBay BIN</strong> source above to find cheap eBay listings to buy and resell.
-                    </p>
-                  )}
-                  {Object.values(ffSourceStatus).some((s) => s === 'ok' || s === 'empty') && (
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+                <div className="card" style={{ padding: '32px 20px', marginBottom: 24 }}>
+                  {/* Status badges */}
+                  {Object.keys(ffSourceStatus).length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
                       {Object.entries(ffSourceStatus).map(([src, st]) => (
-                        <span key={src} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: st === 'ok' ? 'rgba(0,255,65,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${st === 'ok' ? 'rgba(0,255,65,0.3)' : 'var(--border-color)'}`, color: st === 'ok' ? 'var(--neon-green)' : 'var(--text-muted)' }}>
+                        <span key={src} style={{
+                          fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 600,
+                          background: st === 'ok' ? 'rgba(0,255,65,0.1)' : st === 'error' ? 'rgba(255,60,60,0.08)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${st === 'ok' ? 'rgba(0,255,65,0.35)' : st === 'error' ? 'rgba(255,80,80,0.3)' : 'var(--border-color)'}`,
+                          color: st === 'ok' ? 'var(--neon-green)' : st === 'error' ? '#ff6b6b' : 'var(--text-muted)',
+                        }}>
                           {src} {st === 'ok' ? '✓' : st === 'error' ? '✗' : '—'}
                         </span>
                       ))}
                     </div>
                   )}
-                  <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 10 }}>Try a broader keyword like "led" or "phone case".</p>
+
+                  {/* ScraperAPI setup banner — shown when no key and sources errored */}
+                  {ffHasScraperKey === false && Object.values(ffSourceStatus).some(s => s === 'error') && (
+                    <div style={{ padding: '14px 16px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#818cf8', marginBottom: 6 }}>
+                        Wholesale sources are blocked — fix it for free in 2 min
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>
+                        AliExpress, DHgate, and similar sites block requests from server IPs (AWS/Vercel).
+                        <strong style={{ color: 'var(--text-primary)' }}> ScraperAPI</strong> routes through real residential IPs
+                        and has a <strong style={{ color: 'var(--neon-green)' }}>free tier (1,000 credits/month)</strong> — more than enough for daily use.
+                      </div>
+                      <ol style={{ fontSize: 12, color: 'var(--text-secondary)', paddingLeft: 20, margin: 0, lineHeight: 2 }}>
+                        <li>Sign up free at <strong style={{ color: 'var(--text-primary)' }}>scraperapi.com</strong></li>
+                        <li>Copy your API key from the dashboard</li>
+                        <li>In Vercel → your project → <strong style={{ color: 'var(--text-primary)' }}>Settings → Environment Variables</strong></li>
+                        <li>Add: <code style={{ background: 'var(--bg-hover)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 11 }}>SCRAPER_API_KEY</code> = your key</li>
+                        <li>Redeploy — Flip Finder will work instantly</li>
+                      </ol>
+                    </div>
+                  )}
+
+                  {/* Debug toggle */}
+                  {Object.keys(ffSourceErrors).length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setFfShowDebug(v => !v)}
+                        style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', marginBottom: 8 }}
+                      >
+                        {ffShowDebug ? 'Hide' : 'Show'} error details ({Object.keys(ffSourceErrors).length} sources)
+                      </button>
+                      {ffShowDebug && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {Object.entries(ffSourceErrors).map(([src, detail]) => (
+                            <div key={src} style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
+                              <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{src}:</span> {detail}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {Object.keys(ffSourceStatus).length === 0 && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>No wholesale results found for "{ffQuery}" — try a broader keyword.</p>
+                  )}
                 </div>
               ) : (
                 /* Wholesale found but all filtered out */
