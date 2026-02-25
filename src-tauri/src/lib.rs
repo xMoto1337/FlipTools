@@ -1,6 +1,7 @@
 use tauri::{Manager, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 use std::sync::Mutex;
+use std::collections::HashMap;
 use serde::Serialize;
 
 struct UpdateState {
@@ -99,6 +100,62 @@ fn get_changelog() -> String {
     include_str!("../../CHANGELOG.md").to_string()
 }
 
+// ── Native HTTP fetch ──────────────────────────────────────────────────────
+// Runs on the user's machine using their own residential IP, bypassing
+// bot-detection that blocks AWS/Vercel datacenter IPs.
+#[derive(Serialize)]
+struct NativeFetchResponse {
+    status: u16,
+    content_type: String,
+    body: String,
+}
+
+#[tauri::command]
+async fn native_fetch(
+    url: String,
+    method: Option<String>,
+    headers: Option<HashMap<String, String>>,
+    body: Option<String>,
+) -> Result<NativeFetchResponse, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .gzip(true)
+        .deflate(true)
+        .brotli(true)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| format!("client build: {}", e))?;
+
+    let method_str = method.as_deref().unwrap_or("GET").to_uppercase();
+    let mut req = match method_str.as_str() {
+        "POST" => client.post(&url),
+        "PUT"  => client.put(&url),
+        _      => client.get(&url),
+    };
+
+    if let Some(hdrs) = headers {
+        for (k, v) in &hdrs {
+            req = req.header(k.as_str(), v.as_str());
+        }
+    }
+
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("request: {}", e))?;
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body = resp.text().await.map_err(|e| format!("body: {}", e))?;
+
+    Ok(NativeFetchResponse { status, content_type, body })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -112,7 +169,8 @@ pub fn run() {
             check_for_update,
             install_update,
             get_current_version,
-            get_changelog
+            get_changelog,
+            native_fetch
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

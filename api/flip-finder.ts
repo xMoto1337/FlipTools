@@ -6,7 +6,7 @@ export interface FlipSource {
   buyPrice: number;
   image: string;
   url: string;
-  source: 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
+  source: 'alibaba' | 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
   minOrder: number;
   shippingDesc: string;
   rating?: number;
@@ -18,29 +18,16 @@ type SourceResult =
   | { status: 'empty'; items: FlipSource[]; detail: string }
   | { status: 'error'; items: FlipSource[]; detail: string };
 
-// ── Proxy wrapper ──────────────────────────────────────────────────────────
-// When SCRAPER_API_KEY is set in Vercel env vars, all outbound requests are
-// routed through ScraperAPI (scraperapi.com — free 1000 credits/month).
-// Without it the requests still try directly; many will be blocked by bot
-// protection on AWS IPs, but the errors will be reported per-source.
-const SCRAPER_KEY = process.env.SCRAPER_API_KEY ?? '';
-
-async function proxiedFetch(
+// Direct fetch — web/serverless path. Requests come from Vercel (AWS) IPs so
+// heavily bot-protected sites may block them. The desktop Tauri app uses
+// native_fetch instead, routing through the user's own residential IP.
+async function directFetch(
   url: string,
   headers: Record<string, string> = {},
   options: { method?: string; body?: string; timeoutMs?: number } = {}
 ): Promise<Response> {
   const { method = 'GET', body, timeoutMs = 18000 } = options;
-  const signal = AbortSignal.timeout(timeoutMs);
-
-  if (SCRAPER_KEY) {
-    const proxyUrl =
-      `https://api.scraperapi.com?api_key=${SCRAPER_KEY}` +
-      `&url=${encodeURIComponent(url)}&render=false`;
-    return fetch(proxyUrl, { method, headers, body, signal });
-  }
-
-  return fetch(url, { method, headers, body, signal });
+  return fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
 }
 
 // ── Shared browser-like headers ────────────────────────────────────────────
@@ -75,7 +62,7 @@ async function searchAliExpress(query: string): Promise<SourceResult> {
       sortType: 'default',
     });
 
-    const res = await proxiedFetch(
+    const res = await directFetch(
       `https://www.aliexpress.com/glosearch/api/product?${params}`,
       {
         ...BASE_HEADERS,
@@ -148,7 +135,7 @@ async function searchAliExpress(query: string): Promise<SourceResult> {
 async function searchDHgate(query: string): Promise<SourceResult> {
   try {
     const params = new URLSearchParams({ searchkey: query, pageNo: '1', pageSize: '30' });
-    const res = await proxiedFetch(
+    const res = await directFetch(
       `https://www.dhgate.com/wholesale/search.do?${params}`,
       { ...BASE_HEADERS, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8', Referer: 'https://www.dhgate.com/' },
       { timeoutMs: 18000 }
@@ -159,9 +146,10 @@ async function searchDHgate(query: string): Promise<SourceResult> {
     const html = await res.text();
 
     const patterns: [RegExp, string][] = [
+      // Next.js embeds page data in <script id="__NEXT_DATA__" type="application/json">{...}</script>
+      [/<script[^>]+id="__NEXT_DATA__"[^>]*>([\s\S]+?)<\/script>/, '__NEXT_DATA__'],
       [/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]+?\});\s*<\/script>/, '__INITIAL_STATE__'],
       [/"productList"\s*:\s*(\[[\s\S]{20,500000}\])\s*,\s*"pagination"/, 'productList array'],
-      [/window\.__NEXT_DATA__\s*=\s*({[\s\S]+?})\s*<\/script>/, '__NEXT_DATA__'],
     ];
 
     for (const [pattern, label] of patterns) {
@@ -169,10 +157,12 @@ async function searchDHgate(query: string): Promise<SourceResult> {
       if (!match) continue;
       try {
         const raw = JSON.parse(match[1]);
+        const pp = (raw?.props as Record<string, unknown>)?.pageProps as Record<string, unknown> | undefined;
         const list: Record<string, unknown>[] = Array.isArray(raw)
           ? raw
-          : (raw?.searchResult as Record<string, unknown>)?.data as Record<string, unknown>[] ??
-            (raw?.props as Record<string, unknown>)?.pageProps as Record<string, unknown>[] ??
+          : (pp?.searchResult as Record<string, unknown>)?.data as Record<string, unknown>[] ??
+            (pp?.productList as Record<string, unknown>[]) ??
+            (raw?.searchResult as Record<string, unknown>)?.data as Record<string, unknown>[] ??
             [];
         if (list.length === 0) continue;
         const items = list.slice(0, 20).flatMap<FlipSource>((item) => {
@@ -204,8 +194,83 @@ async function searchDHgate(query: string): Promise<SourceResult> {
       status: 'error',
       items: [],
       detail: isBot
-        ? 'Bot challenge / access denied page returned. Needs ScraperAPI.'
+        ? 'Bot challenge / access denied (site is blocking server IPs — use the desktop app)'
         : `No product JSON found in HTML (${html.length} bytes). First 200: ${html.slice(0, 200)}`,
+    };
+  } catch (err) {
+    return { status: 'error', items: [], detail: (err as Error).message };
+  }
+}
+
+// ── Alibaba (B2B) ──────────────────────────────────────────────────────────
+async function searchAlibaba(query: string): Promise<SourceResult> {
+  try {
+    const params = new URLSearchParams({
+      SearchText: query, IndexArea: 'product_en', fsb: 'y', page: '1',
+    });
+    const res = await directFetch(
+      `https://www.alibaba.com/trade/search?${params}`,
+      { ...BASE_HEADERS, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8', Referer: 'https://www.alibaba.com/' },
+      { timeoutMs: 20000 }
+    );
+
+    if (!res.ok) return { status: 'error', items: [], detail: `HTTP ${res.status}` };
+    const html = await res.text();
+
+    // Alibaba embeds product data in window.__page_params__ → tradeSearchModule.resultList
+    const patterns: [RegExp, string][] = [
+      [/<script[^>]*>\s*window\.__page_params__\s*=\s*([\s\S]+?);\s*window\./, '__page_params__'],
+      [/window\.__page_params__\s*=\s*({[\s\S]+?});\s*<\/script>/, '__page_params__ (end)'],
+      [/"resultList"\s*:\s*(\[[\s\S]{10,300000}\])\s*,\s*"(?:totalCount|pagination)"/, 'resultList'],
+    ];
+
+    for (const [pattern, label] of patterns) {
+      const match = html.match(pattern);
+      if (!match) continue;
+      try {
+        const raw = JSON.parse(match[1]);
+        const list: Record<string, unknown>[] = Array.isArray(raw)
+          ? raw
+          : raw?.tradeSearchModule?.resultList ??
+            raw?.resultList ??
+            (raw?.data as Record<string, unknown>)?.resultList ??
+            [];
+        if (!Array.isArray(list) || list.length === 0) continue;
+
+        const items = list.slice(0, 20).flatMap<FlipSource>((item) => {
+          const priceVO = item?.priceVO as Record<string, unknown> | undefined;
+          const priceStr = String(priceVO?.minPrice ?? priceVO?.price ?? item?.price ?? '0');
+          const price = safeFloat(priceStr.replace(/[^0-9.]/g, ''));
+          if (price === 0) return [];
+          const imgRaw = String(item?.imageUrl ?? item?.imgUrl ?? '');
+          const detailRaw = String(item?.detail_url ?? item?.productHref ?? '');
+          return [{
+            id: `alib-${item?.product_id ?? item?.id ?? Math.random()}`,
+            title: String(item?.subject ?? item?.title ?? 'Unknown').slice(0, 120),
+            buyPrice: price,
+            image: imgRaw.startsWith('//') ? `https:${imgRaw}` : imgRaw.startsWith('http') ? imgRaw : '',
+            url: detailRaw.startsWith('//') ? `https:${detailRaw}` : detailRaw.startsWith('http') ? detailRaw : `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(query)}`,
+            source: 'alibaba',
+            minOrder: safeInt(item?.moq ?? item?.minOrderQuantity, 1) || 1,
+            shippingDesc: String((item?.logistics as Record<string, unknown>)?.freightFee ?? 'Varies'),
+            rating: safeFloat(item?.starRating ?? item?.score) || undefined,
+            totalOrders: safeInt(item?.tradeCount ?? item?.totalOrders) || undefined,
+          }];
+        });
+        if (items.length > 0) return { status: 'ok', items };
+        return { status: 'empty', items: [], detail: `${label}: ${list.length} products, 0 with valid prices` };
+      } catch (e) {
+        console.warn('[alibaba] parse error for', label, e);
+        continue;
+      }
+    }
+
+    const isBot = /challenge|captcha|access.denied/i.test(html.slice(0, 1000));
+    return {
+      status: 'error', items: [],
+      detail: isBot
+        ? 'Bot challenge page'
+        : `No product JSON found (${html.length}b). First 200: ${html.slice(0, 200)}`,
     };
   } catch (err) {
     return { status: 'error', items: [], detail: (err as Error).message };
@@ -216,7 +281,7 @@ async function searchDHgate(query: string): Promise<SourceResult> {
 async function searchWish(query: string): Promise<SourceResult> {
   try {
     const params = new URLSearchParams({ query, count: '20', skip: '0', version: '2' });
-    const res = await proxiedFetch(
+    const res = await directFetch(
       `https://www.wish.com/api/search/search?${params}`,
       { ...BASE_HEADERS, Accept: 'application/json', Referer: 'https://www.wish.com/search/' },
       { timeoutMs: 15000 }
@@ -269,7 +334,7 @@ async function searchWish(query: string): Promise<SourceResult> {
 // ── Temu ───────────────────────────────────────────────────────────────────
 async function searchTemu(query: string): Promise<SourceResult> {
   try {
-    const res = await proxiedFetch(
+    const res = await directFetch(
       'https://www.temu.com/api/poppy/v1/search',
       {
         ...BASE_HEADERS,
@@ -335,7 +400,7 @@ async function searchShein(query: string): Promise<SourceResult> {
       SearchWord: query, page: '1', limit: '40',
       currency: 'USD', country: 'US', lang: 'en', sort: '0',
     });
-    const res = await proxiedFetch(
+    const res = await directFetch(
       `https://us.shein.com/api/productList/info/v1?${params}`,
       {
         ...BASE_HEADERS,
@@ -410,6 +475,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const all = requestedSources.includes('all');
 
   const tasks: [string, Promise<SourceResult>][] = [];
+  if (all || requestedSources.includes('alibaba'))    tasks.push(['alibaba',    searchAlibaba(query)]);
   if (all || requestedSources.includes('aliexpress')) tasks.push(['aliexpress', searchAliExpress(query)]);
   if (all || requestedSources.includes('dhgate'))     tasks.push(['dhgate',     searchDHgate(query)]);
   if (all || requestedSources.includes('wish'))       tasks.push(['wish',       searchWish(query)]);
@@ -437,8 +503,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   results.sort((a, b) => a.buyPrice - b.buyPrice);
 
-  const hasScraperKey = !!SCRAPER_KEY;
-
   res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate');
-  return res.json({ results, query, count: results.length, sourceStatus, sourceErrors, hasScraperKey });
+  return res.json({ results, query, count: results.length, sourceStatus, sourceErrors });
 }

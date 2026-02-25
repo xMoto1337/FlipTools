@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-type FlipSourceId = 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
+type FlipSourceId = 'alibaba' | 'aliexpress' | 'dhgate' | 'wish' | 'temu' | 'shein';
 interface FlipSource {
   id: string;
   title: string;
@@ -13,12 +13,14 @@ interface FlipSource {
   rating?: number;
   totalOrders?: number;
 }
-const FF_SOURCES: { id: FlipSourceId; label: string; color: string; bg: string; border: string }[] = [
-  { id: 'aliexpress', label: 'AliExpress', color: '#ff6600', bg: 'rgba(255,102,0,0.15)', border: '#ff660055' },
-  { id: 'dhgate',     label: 'DHgate',     color: 'var(--neon-cyan)', bg: 'rgba(0,180,255,0.12)', border: 'rgba(0,180,255,0.3)' },
-  { id: 'wish',       label: 'Wish',       color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)' },
-  { id: 'temu',       label: 'Temu',       color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)' },
-  { id: 'shein',      label: 'Shein',      color: '#ff69b4', bg: 'rgba(255,105,180,0.12)', border: 'rgba(255,105,180,0.3)' },
+// webCompatible: true = works from Vercel server IPs; false = blocked by bot detection, needs desktop app
+const FF_SOURCES: { id: FlipSourceId; label: string; color: string; bg: string; border: string; webCompatible: boolean }[] = [
+  { id: 'alibaba',    label: 'Alibaba',    color: '#ff6a00', bg: 'rgba(255,106,0,0.15)',   border: 'rgba(255,106,0,0.4)',    webCompatible: true },
+  { id: 'dhgate',     label: 'DHgate',     color: 'var(--neon-cyan)', bg: 'rgba(0,180,255,0.12)', border: 'rgba(0,180,255,0.3)', webCompatible: true },
+  { id: 'aliexpress', label: 'AliExpress', color: '#ff6600', bg: 'rgba(255,102,0,0.15)',   border: '#ff660055',              webCompatible: false },
+  { id: 'wish',       label: 'Wish',       color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)',   webCompatible: false },
+  { id: 'temu',       label: 'Temu',       color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',  border: 'rgba(244,63,94,0.3)',    webCompatible: false },
+  { id: 'shein',      label: 'Shein',      color: '#ff69b4', bg: 'rgba(255,105,180,0.12)', border: 'rgba(255,105,180,0.3)', webCompatible: false },
 ];
 import { useDropzone } from 'react-dropzone';
 import { usePlatformStore } from '../stores/platformStore';
@@ -32,6 +34,17 @@ import { PriceTrendChart } from '../components/Research/PriceTrendChart';
 import { ProfitCalculator } from '../components/Research/ProfitCalculator';
 import { SearchHistory } from '../components/Research/SearchHistory';
 import { SavedSearches } from '../components/Research/SavedSearches';
+import { isTauri } from '../utils/isTauri';
+import {
+  searchAlibaba as ffAlibaba,
+  searchAliExpress as ffAliExpress,
+  searchDHgate as ffDHgate,
+  searchWish as ffWish,
+  searchTemu as ffTemu,
+  searchShein as ffShein,
+  type FlipSource as FFSourceType,
+  type NativeFetcher,
+} from '../api/flipFinderSources';
 
 export default function ResearchPage() {
   const { requireAuth } = useRequireAuth();
@@ -227,7 +240,11 @@ export default function ResearchPage() {
   // ── Flip Finder state ──────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'comps' | 'flipfinder'>('comps');
   const [ffQuery, setFfQuery] = useState('');
-  const [ffSources, setFfSources] = useState<Record<string, boolean>>({ aliexpress: true, dhgate: true, wish: true, temu: true, shein: true });
+  // On web (non-Tauri), default only web-compatible sources on; desktop-only sources are still toggleable
+  const [ffSources, setFfSources] = useState<Record<string, boolean>>(() => {
+    const desktop = isTauri();
+    return { alibaba: true, dhgate: true, aliexpress: desktop, wish: desktop, temu: desktop, shein: desktop };
+  });
   const [ffMaxBuy, setFfMaxBuy] = useState('');
   const [ffMinRoi, setFfMinRoi] = useState('');
   const [ffSort, setFfSort] = useState<'score' | 'roi' | 'profit' | 'demand'>('score');
@@ -238,7 +255,7 @@ export default function ResearchPage() {
   const [ffSearched, setFfSearched] = useState(false);
   const [ffSourceStatus, setFfSourceStatus] = useState<Record<string, 'ok' | 'empty' | 'error'>>({});
   const [ffSourceErrors, setFfSourceErrors] = useState<Record<string, string>>({});
-  const [ffHasScraperKey, setFfHasScraperKey] = useState<boolean | null>(null);
+
   const [ffShowDebug, setFfShowDebug] = useState(false);
   const [ffSaved, setFfSaved] = useState<FlipSource[]>(() => {
     try { return JSON.parse(localStorage.getItem('ft_ff_saved') || '[]'); } catch { return []; }
@@ -311,55 +328,85 @@ export default function ResearchPage() {
       .map(([k]) => k)
       .join(',') || 'all';
 
+    // eBay comps always runs in parallel regardless of wholesale path
+    const ebayCompsPromise = (async () => {
+      if (!hasConnectedPlatform) return [];
+      const all: { title: string; price: number }[] = [];
+      for (const pid of getPlatformIds()) {
+        const token = getToken(pid);
+        if (!token || !isConnected(pid)) continue;
+        const items = await getPlatform(pid).searchSold(q, token);
+        all.push(...items.map((i) => ({ title: i.title, price: i.price })));
+      }
+      return all;
+    })();
+
     try {
-      const [wholesaleRes, ebayCompsRes] = await Promise.allSettled([
-        // Wholesale buy-side: AliExpress, DHgate, Wish, Temu, Shein
-        fetch(`/api/flip-finder?q=${encodeURIComponent(q)}&source=${activeSources}`).then((r) => r.json()),
-
-        // eBay sell-side: sold comps to calculate profit
-        (async () => {
-          if (!hasConnectedPlatform) return [];
-          const all: { title: string; price: number }[] = [];
-          for (const pid of getPlatformIds()) {
-            const token = getToken(pid);
-            if (!token || !isConnected(pid)) continue;
-            const items = await getPlatform(pid).searchSold(q, token);
-            all.push(...items.map((i) => ({ title: i.title, price: i.price })));
-          }
-          return all;
-        })(),
-      ]);
-
       const newStatus: Record<string, 'ok' | 'empty' | 'error'> = {};
+      const newErrors: Record<string, string> = {};
+      let wItems: FlipSource[] = [];
 
-      if (wholesaleRes.status === 'fulfilled') {
-        const wData = wholesaleRes.value as {
+      if (isTauri()) {
+        // ── Desktop path: native HTTP from user's own residential IP ──────
+        const { invoke } = await import('@tauri-apps/api/core');
+
+        const fetcher: NativeFetcher = (url, opts) =>
+          invoke<{ status: number; content_type: string; body: string }>('native_fetch', {
+            url,
+            method: opts?.method ?? 'GET',
+            headers: opts?.headers ?? {},
+            body: opts?.body ?? null,
+          });
+
+        type SourceEntry = [string, () => Promise<{ status: string; items: FFSourceType[]; detail?: string }>];
+        const sourceMap: SourceEntry[] = (
+          [
+            ['alibaba',    () => ffAlibaba(q, fetcher)],
+            ['aliexpress', () => ffAliExpress(q, fetcher)],
+            ['dhgate',     () => ffDHgate(q, fetcher)],
+            ['wish',       () => ffWish(q, fetcher)],
+            ['temu',       () => ffTemu(q, fetcher)],
+            ['shein',      () => ffShein(q, fetcher)],
+          ] as SourceEntry[]
+        ).filter(([id]) => ffSources[id]);
+
+        const results = await Promise.allSettled(sourceMap.map(([, fn]) => fn()));
+        for (let i = 0; i < results.length; i++) {
+          const name = sourceMap[i][0];
+          const r = results[i];
+          if (r.status === 'fulfilled') {
+            wItems.push(...(r.value.items as FlipSource[]));
+            newStatus[name] = r.value.status as 'ok' | 'empty' | 'error';
+            if (r.value.status !== 'ok' && r.value.detail) newErrors[name] = r.value.detail;
+          } else {
+            newStatus[name] = 'error';
+            newErrors[name] = String(r.reason?.message ?? r.reason);
+          }
+        }
+      } else {
+        // ── Web path: Vercel serverless function ──────────────────────────
+        const apiRes = await fetch(
+          `/api/flip-finder?q=${encodeURIComponent(q)}&source=${activeSources}`
+        ).then((r) => r.json()) as {
           results?: FlipSource[];
           sourceStatus?: Record<string, string>;
           sourceErrors?: Record<string, string>;
-          hasScraperKey?: boolean;
         };
-        const wItems = wData.results ?? [];
-        for (const [src, st] of Object.entries(wData.sourceStatus ?? {})) {
+
+        wItems = apiRes.results ?? [];
+        for (const [src, st] of Object.entries(apiRes.sourceStatus ?? {})) {
           newStatus[src] = st as 'ok' | 'empty' | 'error';
         }
-        activeSources.split(',').filter(Boolean).forEach((s) => {
-          if (!newStatus[s]) newStatus[s] = wItems.some((i) => i.source === s) ? 'ok' : 'empty';
-        });
-        wItems.sort((a, b) => a.buyPrice - b.buyPrice);
-        setFfWholesale(wItems);
-        setFfSourceErrors(wData.sourceErrors ?? {});
-        if (wData.hasScraperKey !== undefined) setFfHasScraperKey(wData.hasScraperKey);
-      } else {
-        activeSources.split(',').filter(Boolean).forEach((s) => { newStatus[s] = 'error'; });
-        setFfError('Wholesale API request failed — the function may have timed out.');
+        Object.assign(newErrors, apiRes.sourceErrors ?? {});
       }
 
-      if (ebayCompsRes.status === 'fulfilled') {
-        setFfEbaySold(ebayCompsRes.value as { title: string; price: number }[]);
-      }
-
+      wItems.sort((a, b) => a.buyPrice - b.buyPrice);
+      setFfWholesale(wItems);
       setFfSourceStatus(newStatus);
+      setFfSourceErrors(newErrors);
+
+      const ebayComps = await ebayCompsPromise.catch(() => []);
+      setFfEbaySold(ebayComps as { title: string; price: number }[]);
     } catch (err) {
       console.error('[FlipFinder]', err);
       setFfError('Search failed. Please try again.');
@@ -591,8 +638,10 @@ export default function ResearchPage() {
               <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sources</span>
               {FF_SOURCES.map((src) => {
                 const on = ffSources[src.id];
+                const webOnly = !isTauri() && !src.webCompatible;
                 return (
                   <button key={src.id} onClick={() => setFfSources((p) => ({ ...p, [src.id]: !p[src.id] }))}
+                    title={webOnly ? 'May be blocked on web — works reliably in the desktop app' : undefined}
                     style={{
                       padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
                       background: on ? src.bg : 'transparent',
@@ -600,13 +649,25 @@ export default function ResearchPage() {
                       color: on ? src.color : 'var(--text-muted)',
                       transition: 'all 0.15s',
                       display: 'flex', alignItems: 'center', gap: 5,
+                      opacity: webOnly && !on ? 0.5 : 1,
                     }}
                   >
                     {on && <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6L9 17l-5-5"/></svg>}
                     {src.label}
+                    {webOnly && (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
+                        <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                      </svg>
+                    )}
                   </button>
                 );
               })}
+              {!isTauri() && (
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: 3 }}><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  = desktop app only
+                </span>
+              )}
             </div>
 
             {/* Filters row */}
@@ -889,24 +950,11 @@ export default function ResearchPage() {
                     </div>
                   )}
 
-                  {/* ScraperAPI setup banner — shown when no key and sources errored */}
-                  {ffHasScraperKey === false && Object.values(ffSourceStatus).some(s => s === 'error') && (
-                    <div style={{ padding: '14px 16px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#818cf8', marginBottom: 6 }}>
-                        Wholesale sources are blocked — fix it for free in 2 min
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>
-                        AliExpress, DHgate, and similar sites block requests from server IPs (AWS/Vercel).
-                        <strong style={{ color: 'var(--text-primary)' }}> ScraperAPI</strong> routes through real residential IPs
-                        and has a <strong style={{ color: 'var(--neon-green)' }}>free tier (1,000 credits/month)</strong> — more than enough for daily use.
-                      </div>
-                      <ol style={{ fontSize: 12, color: 'var(--text-secondary)', paddingLeft: 20, margin: 0, lineHeight: 2 }}>
-                        <li>Sign up free at <strong style={{ color: 'var(--text-primary)' }}>scraperapi.com</strong></li>
-                        <li>Copy your API key from the dashboard</li>
-                        <li>In Vercel → your project → <strong style={{ color: 'var(--text-primary)' }}>Settings → Environment Variables</strong></li>
-                        <li>Add: <code style={{ background: 'var(--bg-hover)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 11 }}>SCRAPER_API_KEY</code> = your key</li>
-                        <li>Redeploy — Flip Finder will work instantly</li>
-                      </ol>
+                  {/* Desktop app nudge when web sources are blocked */}
+                  {!isTauri() && Object.values(ffSourceStatus).some(s => s === 'error') && (
+                    <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(0,180,255,0.07)', border: '1px solid rgba(0,180,255,0.25)', marginBottom: 16, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                      <span style={{ color: 'var(--neon-cyan)', fontWeight: 600 }}>Tip: </span>
+                      Wholesale sites block requests from server IPs. The <strong style={{ color: 'var(--text-primary)' }}>desktop app</strong> routes searches through your own internet connection — no restrictions, no fees.
                     </div>
                   )}
 
@@ -951,8 +999,9 @@ export default function ResearchPage() {
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
               </svg>
               <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Find products to flip for profit</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 380, margin: '0 auto 20px' }}>
-                Search any product keyword. Flip Finder pulls cheap eBay BIN listings + wholesale sources (AliExpress, DHgate, Wish, Temu, Shein), then cross-references eBay sold comps to calculate your estimated ROI.
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 400, margin: '0 auto 20px' }}>
+                Search any product keyword. Flip Finder scans wholesale sources (Alibaba, DHgate{isTauri() ? ', AliExpress, Temu, Shein, Wish' : ''}), then cross-references eBay sold comps to estimate your ROI.
+                {!isTauri() && <span style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>The desktop app unlocks all sources — some wholesale sites block server IPs.</span>}
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {['led strip lights', 'phone stand', 'bluetooth speaker', 'fidget toy', 'cable organizer'].map((ex) => (
