@@ -254,24 +254,11 @@ a:hover {
 }
 
 .sidebar-logo-img {
-  width: 26px;
-  height: 26px;
+  width: 36px;
+  height: 36px;
   object-fit: contain;
   flex-shrink: 0;
-  border-radius: 5px;
-}
-
-.sidebar-logo-text {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--neon-primary);
-  text-shadow: 0 0 15px color-mix(in srgb, var(--neon-primary) 30%, transparent);
-  white-space: nowrap;
-  letter-spacing: -0.5px;
-}
-
-.sidebar.collapsed .sidebar-logo-text {
-  display: none;
+  border-radius: 6px;
 }
 
 .sidebar.collapsed .sidebar-header {

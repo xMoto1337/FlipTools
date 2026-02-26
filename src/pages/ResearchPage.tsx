@@ -139,7 +139,8 @@ export default function ResearchPage() {
       });
     } catch (err) {
       console.error('Search error:', err);
-      setSearchError('Search failed. Please try again.');
+      const msg = err instanceof Error ? err.message : String(err);
+      setSearchError(`Search failed: ${msg}`);
     } finally {
       setIsSearching(false);
     }
@@ -385,9 +386,14 @@ export default function ResearchPage() {
         }
       } else {
         // ── Web path: Vercel serverless function ──────────────────────────
-        const apiRes = await fetch(
+        const rawRes = await fetch(
           `/api/flip-finder?q=${encodeURIComponent(q)}&source=${activeSources}`
-        ).then((r) => r.json()) as {
+        );
+        if (!rawRes.ok) {
+          const errText = await rawRes.text().catch(() => `HTTP ${rawRes.status}`);
+          throw new Error(`Search API error (${rawRes.status}): ${errText.slice(0, 300)}`);
+        }
+        const apiRes = await rawRes.json() as {
           results?: FlipSource[];
           sourceStatus?: Record<string, string>;
           sourceErrors?: Record<string, string>;
@@ -409,7 +415,8 @@ export default function ResearchPage() {
       setFfEbaySold(ebayComps as { title: string; price: number }[]);
     } catch (err) {
       console.error('[FlipFinder]', err);
-      setFfError('Search failed. Please try again.');
+      const msg = err instanceof Error ? err.message : String(err);
+      setFfError(`Search failed: ${msg}`);
     } finally {
       setFfLoading(false);
     }

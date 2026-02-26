@@ -32,7 +32,6 @@ export default function Sidebar() {
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <img src="/logo.png" alt="FlipTools" className="sidebar-logo-img" />
-          <span className="sidebar-logo-text">FlipTools</span>
         </div>
         <span className="sidebar-version">v{config.version}</span>
       </div>
