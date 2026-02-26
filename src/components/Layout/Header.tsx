@@ -25,7 +25,10 @@ export default function Header({ title }: HeaderProps) {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <span className="header-logo-mobile">FlipTools</span>
+        <span className="header-logo-mobile">
+          <img src="/logo.png" alt="" className="header-logo-img" />
+          FlipTools
+        </span>
         <h1 className="header-title">{title}</h1>
       </div>
       <div className="header-right">

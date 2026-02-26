@@ -19,6 +19,7 @@ export default function AuthPage() {
     <div className="auth-page">
       <div className="auth-container">
         <div className="auth-logo">
+          <img src="/logo.png" alt="FlipTools" className="auth-logo-img" />
           <h1>FlipTools</h1>
           <p>Cross-list, track, and grow your reselling business</p>
         </div>

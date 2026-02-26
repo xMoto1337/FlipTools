@@ -30,7 +30,10 @@ export default function Sidebar() {
   return (
     <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${sidebarMobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        <span className="sidebar-logo">FlipTools</span>
+        <div className="sidebar-logo">
+          <img src="/logo.png" alt="FlipTools" className="sidebar-logo-img" />
+          <span className="sidebar-logo-text">FlipTools</span>
+        </div>
         <span className="sidebar-version">v{config.version}</span>
       </div>
 
