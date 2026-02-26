@@ -3,11 +3,125 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useSubscription } from '../hooks/useSubscription';
 import { usePlatform } from '../hooks/usePlatform';
+import { usePlatformStore } from '../stores/platformStore';
 import { authApi } from '../api/auth';
 import { stripeApi } from '../api/stripe';
 
-function PlatformConnectionCard({ platformId }: { platformId: 'ebay' | 'depop' | 'etsy' }) {
+// ── Depop login modal ────────────────────────────────────────────────────────
+function DepopLoginModal({ onClose }: { onClose: () => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const setConnection = usePlatformStore((s) => s.setConnection);
+
+  const handleLogin = async () => {
+    if (!username.trim() || !password) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/depop-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Login failed. Check your username and password.');
+        return;
+      }
+
+      setConnection('depop', {
+        platform: 'depop',
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || '',
+        tokenExpiresAt: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
+        platformUsername: data.username || username.trim(),
+        connectedAt: new Date().toISOString(),
+        platformUserId: data.user_id ? String(data.user_id) : undefined,
+      });
+
+      onClose();
+    } catch (err) {
+      setError('Could not reach Depop. Try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div className="card" style={{ width: '100%', maxWidth: 400, padding: 32 }}
+        onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginBottom: 4 }}>Connect Depop</h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 24 }}>
+          Enter your Depop login credentials. Your password is sent directly to Depop and never stored.
+        </p>
+
+        <div className="form-group">
+          <label className="form-label">Depop Username</label>
+          <input
+            className="form-input"
+            placeholder="your_username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            disabled={loading}
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Password</label>
+          <input
+            className="form-input"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            disabled={loading}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+          />
+        </div>
+
+        {error && (
+          <p style={{ color: 'var(--neon-red)', fontSize: 13, marginBottom: 16 }}>{error}</p>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button className="btn btn-primary" onClick={handleLogin} disabled={loading || !username || !password}
+            style={{ flex: 1 }}>
+            {loading ? 'Connecting...' : 'Connect'}
+          </button>
+          <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Platform connection card ──────────────────────────────────────────────────
+function PlatformConnectionCard({ platformId, onDepopConnect }: {
+  platformId: 'ebay' | 'depop' | 'etsy';
+  onDepopConnect?: () => void;
+}) {
   const { adapter, isConnected, connect, disconnect } = usePlatform(platformId);
+
+  const handleConnect = () => {
+    if (platformId === 'depop') {
+      onDepopConnect?.();
+    } else {
+      connect();
+    }
+  };
 
   return (
     <div className="platform-connection">
@@ -21,18 +135,20 @@ function PlatformConnectionCard({ platformId }: { platformId: 'ebay' | 'depop' |
       {isConnected ? (
         <button className="btn btn-sm btn-danger" onClick={disconnect}>Disconnect</button>
       ) : (
-        <button className="btn btn-sm btn-primary" onClick={connect}>Connect</button>
+        <button className="btn btn-sm btn-primary" onClick={handleConnect}>Connect</button>
       )}
     </div>
   );
 }
 
+// ── Settings page ─────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user, isAuthenticated } = useAuthStore();
   const { tier, isPaid } = useSubscription();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState(user?.display_name || '');
   const [saving, setSaving] = useState(false);
+  const [showDepopModal, setShowDepopModal] = useState(false);
 
   if (!isAuthenticated) {
     return (
@@ -74,6 +190,8 @@ export default function SettingsPage() {
 
   return (
     <div>
+      {showDepopModal && <DepopLoginModal onClose={() => setShowDepopModal(false)} />}
+
       <div className="page-header">
         <h1>Settings</h1>
       </div>
@@ -138,7 +256,7 @@ export default function SettingsPage() {
           <div className="settings-section-title">Platform Connections</div>
           <PlatformConnectionCard platformId="ebay" />
           <PlatformConnectionCard platformId="etsy" />
-          <PlatformConnectionCard platformId="depop" />
+          <PlatformConnectionCard platformId="depop" onDepopConnect={() => setShowDepopModal(true)} />
         </div>
       </div>
 

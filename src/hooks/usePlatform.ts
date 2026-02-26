@@ -24,9 +24,16 @@ export const usePlatform = (platformId: PlatformId) => {
 
     const popup = window.open(authUrl, `${platformId}-auth`, 'width=600,height=700');
 
+    if (!popup) {
+      // Popup was blocked — fall back to same-tab navigation
+      // The callback page handles both popup and non-popup contexts
+      window.location.href = authUrl;
+      return;
+    }
+
     // Listen for the popup to complete and close
     const checkInterval = setInterval(() => {
-      if (popup?.closed) {
+      if (popup.closed) {
         clearInterval(checkInterval);
         window.location.reload();
       }

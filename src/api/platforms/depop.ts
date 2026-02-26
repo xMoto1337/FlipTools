@@ -26,8 +26,9 @@ export const depopAdapter: PlatformAdapter = {
   color: '#ff2300',
 
   getAuthUrl(): string {
-    // Depop OAuth — would need registered app credentials
-    return `https://www.depop.com/oauth/authorize?client_id=&redirect_uri=${encodeURIComponent(window.location.origin + '/auth/depop/callback')}&response_type=code`;
+    // Depop uses username/password login (no public OAuth).
+    // Return a sentinel value — SettingsPage handles this with a login modal.
+    return '__depop_login__';
   },
 
   async handleCallback(code: string): Promise<TokenPair> {
@@ -51,17 +52,14 @@ export const depopAdapter: PlatformAdapter = {
   },
 
   async refreshToken(refreshToken: string): Promise<TokenPair> {
-    const response = await fetch(`${DEPOP_API_URL}/oauth/token`, {
+    const response = await fetch('/api/depop-auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
+      body: JSON.stringify({ action: 'refresh', refresh_token: refreshToken }),
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error('Depop token refresh failed');
+    if (!response.ok) throw new Error(data.error || 'Depop token refresh failed');
 
     return {
       accessToken: data.access_token,
