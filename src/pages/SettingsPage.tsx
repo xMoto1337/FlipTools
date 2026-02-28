@@ -10,10 +10,12 @@ import { isTauri } from '../utils/isTauri';
 import { config } from '../config';
 
 // ── Platform connection card ──────────────────────────────────────────────────
-function PlatformConnectionCard({ platformId, onDepopConnect, desktopOnly }: {
+function PlatformConnectionCard({ platformId, onDepopConnect, desktopOnly, connecting, connectError }: {
   platformId: 'ebay' | 'depop' | 'etsy';
   onDepopConnect?: () => void;
   desktopOnly?: boolean;
+  connecting?: boolean;
+  connectError?: string;
 }) {
   const { adapter, isConnected, connect, disconnect } = usePlatform(platformId);
 
@@ -40,6 +42,8 @@ function PlatformConnectionCard({ platformId, onDepopConnect, desktopOnly }: {
           href={config.desktopDownloadUrl}
           className="btn btn-sm btn-secondary"
           style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}
+          target="_blank"
+          rel="noopener noreferrer"
         >
           Get App
         </a>
@@ -48,18 +52,27 @@ function PlatformConnectionCard({ platformId, onDepopConnect, desktopOnly }: {
   }
 
   return (
-    <div className="platform-connection">
-      <div className={`platform-icon ${platformId}`}>{adapter.name[0]}</div>
-      <div className="platform-info">
-        <div className="platform-name">{adapter.name}</div>
-        <div className={`platform-status ${isConnected ? 'connected' : ''}`}>
-          {isConnected ? 'Connected' : 'Not connected'}
+    <div>
+      <div className="platform-connection">
+        <div className={`platform-icon ${platformId}`}>{adapter.name[0]}</div>
+        <div className="platform-info">
+          <div className="platform-name">{adapter.name}</div>
+          <div className={`platform-status ${isConnected ? 'connected' : ''}`}>
+            {connecting ? 'Opening login window…' : isConnected ? 'Connected' : 'Not connected'}
+          </div>
         </div>
+        {isConnected ? (
+          <button className="btn btn-sm btn-danger" onClick={disconnect} disabled={connecting}>Disconnect</button>
+        ) : (
+          <button className="btn btn-sm btn-primary" onClick={handleConnect} disabled={connecting}>
+            {connecting ? '…' : 'Connect'}
+          </button>
+        )}
       </div>
-      {isConnected ? (
-        <button className="btn btn-sm btn-danger" onClick={disconnect}>Disconnect</button>
-      ) : (
-        <button className="btn btn-sm btn-primary" onClick={handleConnect}>Connect</button>
+      {connectError && (
+        <div style={{ fontSize: 12, color: 'var(--neon-red)', marginTop: 6, paddingLeft: 44 }}>
+          {connectError}
+        </div>
       )}
     </div>
   );
@@ -72,6 +85,8 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState(user?.display_name || '');
   const [saving, setSaving] = useState(false);
+  const [depopConnecting, setDepopConnecting] = useState(false);
+  const [depopError, setDepopError] = useState('');
   const setConnection = usePlatformStore((s) => s.setConnection);
 
   if (!isAuthenticated) {
@@ -116,6 +131,8 @@ export default function SettingsPage() {
   // Bearer token via the initialization_script, and save the connection.
   const handleDepopConnect = async () => {
     if (!isTauri()) return;
+    setDepopConnecting(true);
+    setDepopError('');
     try {
       const [{ listen }, { invoke }] = await Promise.all([
         import('@tauri-apps/api/event'),
@@ -125,6 +142,7 @@ export default function SettingsPage() {
       // Listen for the token before invoking so we don't miss it
       const unlisten = await listen<string>('depop-token', (event) => {
         unlisten();
+        setDepopConnecting(false);
         setConnection('depop', {
           platform: 'depop',
           accessToken: event.payload,
@@ -137,6 +155,8 @@ export default function SettingsPage() {
 
       await invoke('open_depop_login');
     } catch (err) {
+      setDepopConnecting(false);
+      setDepopError(`Failed to open login window: ${err}`);
       console.error('Depop connect error:', err);
     }
   };
@@ -236,6 +256,8 @@ export default function SettingsPage() {
             platformId="depop"
             desktopOnly={true}
             onDepopConnect={handleDepopConnect}
+            connecting={depopConnecting}
+            connectError={depopError}
           />
         </div>
       </div>
