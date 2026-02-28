@@ -16,6 +16,7 @@ import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import AdminPage from './pages/AdminPage';
 import EbayCallbackPage from './pages/EbayCallbackPage';
 import EtsyCallbackPage from './pages/EtsyCallbackPage';
+import DepopCallbackPage from './pages/DepopCallbackPage';
 import PrivacyPage from './pages/PrivacyPage';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/ebay/callback" element={<EbayCallbackPage />} />
         <Route path="/auth/etsy/callback" element={<EtsyCallbackPage />} />
+        <Route path="/depop/callback" element={<DepopCallbackPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
 

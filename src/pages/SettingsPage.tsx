@@ -7,49 +7,40 @@ import { usePlatformStore } from '../stores/platformStore';
 import { authApi } from '../api/auth';
 import { stripeApi } from '../api/stripe';
 
-// ── Depop login modal ────────────────────────────────────────────────────────
+// Snippet that runs on depop.com — searches localStorage/sessionStorage/cookies
+// for a JWT (starts with eyJ), then redirects to our callback with the token.
+const DEPOP_SNIPPET = `(function(){var t=null;[localStorage,sessionStorage].forEach(function(s){if(t)return;for(var k in s){var v=s.getItem(k);if(v&&v.startsWith('eyJ')&&v.length>50){t=v;break;}}});if(!t){var ck=document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('eyJ')||c.includes('access_token')||c.includes('depop_token');});if(ck)t=ck.split('=').slice(1).join('=');}if(t){location.href='https://fliptools.net/depop/callback?token='+encodeURIComponent(t);}else{alert('Could not find token. Reload depop.com, browse around for a few seconds, then try again.');}})()`;
+
+// ── Depop login modal ─────────────────────────────────────────────────────────
 function DepopLoginModal({ onClose }: { onClose: () => void }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState('');
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const setConnection = usePlatformStore((s) => s.setConnection);
 
-  const handleLogin = async () => {
-    if (!username.trim() || !password) return;
-    setLoading(true);
-    setError('');
+  const saveToken = (accessToken: string) => {
+    setConnection('depop', {
+      platform: 'depop',
+      accessToken,
+      refreshToken: '',
+      tokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      platformUsername: 'Depop Account',
+      connectedAt: new Date().toISOString(),
+    });
+    onClose();
+  };
 
-    try {
-      const res = await fetch('/api/depop-auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
-      });
+  const handleCopy = () => {
+    navigator.clipboard.writeText(DEPOP_SNIPPET).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Login failed. Check your username and password.');
-        return;
-      }
-
-      setConnection('depop', {
-        platform: 'depop',
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || '',
-        tokenExpiresAt: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
-        platformUsername: data.username || username.trim(),
-        connectedAt: new Date().toISOString(),
-        platformUserId: data.user_id ? String(data.user_id) : undefined,
-      });
-
-      onClose();
-    } catch (err) {
-      setError('Could not reach Depop. Try again.');
-    } finally {
-      setLoading(false);
-    }
+  const handleManualSave = () => {
+    const t = token.trim().replace(/^Bearer\s+/i, '');
+    if (!t) { setError('Paste your Bearer token first.'); return; }
+    saveToken(t);
   };
 
   return (
@@ -57,52 +48,98 @@ function DepopLoginModal({ onClose }: { onClose: () => void }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }} onClick={onClose}>
-      <div className="card" style={{ width: '100%', maxWidth: 400, padding: 32 }}
+      <div className="card" style={{ width: '100%', maxWidth: 480, padding: 32 }}
         onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginBottom: 4 }}>Connect Depop</h3>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 24 }}>
-          Enter your Depop login credentials. Your password is sent directly to Depop and never stored.
+          Depop doesn't offer third-party login. Use the quick connect below — it takes about 30 seconds.
         </p>
 
-        <div className="form-group">
-          <label className="form-label">Depop Username</label>
-          <input
-            className="form-input"
-            placeholder="your_username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            disabled={loading}
-          />
+        {/* Step 1 */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%', background: 'var(--neon-cyan)',
+            color: '#000', fontWeight: 700, fontSize: 12, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2,
+          }}>1</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>Open Depop and log in</div>
+            <a
+              href="https://www.depop.com/login/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-block', textDecoration: 'none' }}
+            >
+              Open depop.com →
+            </a>
+          </div>
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Password</label>
-          <input
-            className="form-input"
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            disabled={loading}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-          />
+        {/* Step 2 */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%', background: 'var(--neon-cyan)',
+            color: '#000', fontWeight: 700, fontSize: 12, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2,
+          }}>2</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>Copy this script</div>
+            <div style={{
+              background: 'var(--bg-tertiary)', borderRadius: 6, padding: '8px 12px',
+              fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)',
+              wordBreak: 'break-all', marginBottom: 8, maxHeight: 52, overflow: 'hidden',
+              position: 'relative',
+            }}>
+              {DEPOP_SNIPPET.slice(0, 80)}…
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={handleCopy}>
+              {copied ? '✓ Copied!' : 'Copy Script'}
+            </button>
+          </div>
         </div>
 
-        {error && (
-          <p style={{ color: 'var(--neon-red)', fontSize: 13, marginBottom: 16 }}>{error}</p>
-        )}
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button className="btn btn-primary" onClick={handleLogin} disabled={loading || !username || !password}
-            style={{ flex: 1 }}>
-            {loading ? 'Connecting...' : 'Connect'}
-          </button>
-          <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
+        {/* Step 3 */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 24, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%', background: 'var(--neon-cyan)',
+            color: '#000', fontWeight: 700, fontSize: 12, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2,
+          }}>3</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Run it on depop.com</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
+              On the Depop tab, press <kbd style={{ background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 3, fontSize: 12 }}>F12</kbd> → <strong>Console</strong> tab → paste → <kbd style={{ background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 3, fontSize: 12 }}>Enter</kbd>.
+              You'll be redirected back here automatically.
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
+              Chrome tip: if prompted, type <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: 3 }}>allow pasting</code> first.
+            </div>
+          </div>
         </div>
+
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 20, marginBottom: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+            Script didn't work? Paste your token manually instead (F12 → Network → any api request → Authorization header):
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="form-input"
+              placeholder="Bearer eyJ..."
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            <button className="btn btn-secondary" onClick={handleManualSave} disabled={!token.trim()}>
+              Save
+            </button>
+          </div>
+          {error && <p style={{ color: 'var(--neon-red)', fontSize: 12, marginTop: 6 }}>{error}</p>}
+        </div>
+
+        <button className="btn btn-secondary btn-sm" onClick={onClose} style={{ marginTop: 12 }}>
+          Cancel
+        </button>
       </div>
     </div>
   );

@@ -1,0 +1,7 @@
+name = "depop-auth-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set with: wrangler secret put PROXY_SECRET)
+# PROXY_SECRET — shared with Vercel's DEPOP_PROXY_SECRET env var

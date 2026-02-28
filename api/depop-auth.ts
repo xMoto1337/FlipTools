@@ -1,11 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Depop unofficial internal API — same endpoints their mobile app uses.
-// This is not a public API and may change without notice.
-const DEPOP_API = 'https://webapi.depop.com/api/v1';
-
-// Depop's mobile app User-Agent (required or they block the request)
-const DEPOP_UA = 'Depop/3.7.0 iOS/17.0';
+// Routes Depop auth through a Cloudflare Worker proxy.
+// The Worker runs on CF's own network, which bypasses the Cloudflare Bot
+// Management that blocks direct requests from Vercel (AWS) datacenters.
+//
+// Required Vercel env vars:
+//   DEPOP_WORKER_URL    — e.g. https://depop-auth-proxy.YOUR_SUBDOMAIN.workers.dev
+//   DEPOP_PROXY_SECRET  — shared secret, must match PROXY_SECRET set in the Worker
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,79 +16,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const workerUrl = process.env.DEPOP_WORKER_URL;
+  if (!workerUrl) {
+    return res.status(503).json({
+      error: 'Depop auth not configured. Set DEPOP_WORKER_URL in Vercel environment variables.',
+    });
+  }
+
   const { action, username, password, refresh_token } = req.body || {};
-
-  // ── Login with username + password ────────────────────────────────────────
-  if (action === 'login') {
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password required' });
-    }
-
-    try {
-      const response = await fetch(`${DEPOP_API}/auth/login/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': DEPOP_UA,
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const msg = data?.message || data?.error || `Login failed (${response.status})`;
-        return res.status(response.status).json({ error: msg });
-      }
-
-      // Return tokens — never echo the password back
-      return res.status(200).json({
-        access_token: data.access_token || data.accessToken,
-        refresh_token: data.refresh_token || data.refreshToken,
-        expires_in: data.expires_in || 3600,
-        username: data.username || username,
-        user_id: data.userId || data.user_id,
-      });
-    } catch (err) {
-      console.error('[depop-auth] login error:', err);
-      return res.status(500).json({ error: 'Failed to reach Depop' });
-    }
+  if (!action) {
+    return res.status(400).json({ error: 'action required' });
   }
 
-  // ── Refresh token ─────────────────────────────────────────────────────────
-  if (action === 'refresh') {
-    if (!refresh_token) {
-      return res.status(400).json({ error: 'refresh_token required' });
-    }
+  try {
+    const workerRes = await fetch(workerUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.DEPOP_PROXY_SECRET
+          ? { 'X-Proxy-Secret': process.env.DEPOP_PROXY_SECRET }
+          : {}),
+      },
+      body: JSON.stringify({ action, username, password, refresh_token }),
+    });
 
-    try {
-      const response = await fetch(`${DEPOP_API}/auth/token/refresh/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': DEPOP_UA,
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ refresh: refresh_token }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return res.status(response.status).json({ error: 'Token refresh failed' });
-      }
-
-      return res.status(200).json({
-        access_token: data.access || data.access_token,
-        refresh_token: data.refresh || refresh_token,
-        expires_in: data.expires_in || 3600,
-      });
-    } catch (err) {
-      console.error('[depop-auth] refresh error:', err);
-      return res.status(500).json({ error: 'Failed to reach Depop' });
-    }
+    const data = await workerRes.json();
+    return res.status(workerRes.status).json(data);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[depop-auth] worker proxy error:', msg);
+    return res.status(500).json({ error: 'Failed to reach auth proxy', detail: msg });
   }
-
-  return res.status(400).json({ error: 'Invalid action. Use "login" or "refresh".' });
 }
