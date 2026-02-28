@@ -2,6 +2,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { config } from '../../config';
+import { isTauri } from '../../utils/isTauri';
 
 export default function Sidebar() {
   const { user, subscription, isAuthenticated, isAdmin } = useAuthStore();
@@ -69,6 +70,30 @@ export default function Sidebar() {
           ))}
         </div>
       </nav>
+
+      {/* Desktop download — only show on the web app */}
+      {!isTauri() && (
+        <div style={{ padding: '0 12px 12px' }}>
+          <a
+            href={config.desktopDownloadUrl}
+            className="sidebar-link"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: 'linear-gradient(135deg, rgba(0,212,255,0.08), rgba(0,212,255,0.03))',
+              border: '1px solid rgba(0,212,255,0.2)', borderRadius: 8,
+              padding: '9px 12px', textDecoration: 'none', color: 'var(--neon-cyan)',
+              fontSize: 13, fontWeight: 500,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <polyline points="8 21 12 17 16 21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <span className="link-label">Get Desktop App</span>
+          </a>
+        </div>
+      )}
 
       <div className="sidebar-footer">
         {isAuthenticated ? (

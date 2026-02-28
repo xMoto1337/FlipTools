@@ -27,4 +27,6 @@ export const config = {
     apiKey: import.meta.env.VITE_GOOGLE_VISION_API_KEY || '',
   },
   version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0',
+  // Desktop installer download URL — update this whenever a new build is published
+  desktopDownloadUrl: 'https://github.com/xmoto1337/fliptools/releases/latest/download/FlipTools_x64-setup.exe',
 };

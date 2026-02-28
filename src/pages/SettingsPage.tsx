@@ -6,6 +6,8 @@ import { usePlatform } from '../hooks/usePlatform';
 import { usePlatformStore } from '../stores/platformStore';
 import { authApi } from '../api/auth';
 import { stripeApi } from '../api/stripe';
+import { isTauri } from '../utils/isTauri';
+import { config } from '../config';
 
 // Snippet that runs on depop.com — searches localStorage/sessionStorage/cookies
 // for a JWT (starts with eyJ), then redirects to our callback with the token.
@@ -232,6 +234,31 @@ export default function SettingsPage() {
       <div className="page-header">
         <h1>Settings</h1>
       </div>
+
+      {/* Desktop app download banner — web only */}
+      {!isTauri() && (
+        <div className="card" style={{
+          marginBottom: 24,
+          background: 'linear-gradient(135deg, rgba(0,212,255,0.06), rgba(0,212,255,0.02))',
+          border: '1px solid rgba(0,212,255,0.2)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '4px 0' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, marginBottom: 2 }}>Get the Desktop App</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                Faster sync, full platform support, and no browser restrictions. Windows installer.
+              </div>
+            </div>
+            <a
+              href={config.desktopDownloadUrl}
+              className="btn btn-primary"
+              style={{ whiteSpace: 'nowrap', textDecoration: 'none' }}
+            >
+              Download (.exe)
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Profile */}
       <div className="card" style={{ marginBottom: 24 }}>
