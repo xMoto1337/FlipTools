@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useAnalyticsStore } from '../stores/analyticsStore';
 import { analyticsApi } from '../api/analytics';
@@ -24,18 +25,21 @@ export default function AnalyticsPage() {
     platformFilter,
     isLoading,
     isSyncing,
+    syncError,
     setSales,
     setStats,
     setDateRange,
     setPlatformFilter,
     setLoading,
     setSyncing,
+    setSyncError,
     setLastSyncedAt,
     getDateRangeStart,
   } = useAnalyticsStore();
 
   const { isFree } = useSubscription();
   const { allowed: advancedAllowed } = useFeatureGate('advanced-analytics');
+  const navigate = useNavigate();
   const cancelledRef = useRef(false);
 
   const syncAndLoad = async (forceSync = false) => {
@@ -53,18 +57,21 @@ export default function AnalyticsPage() {
         }
       } else {
         setSyncing(true);
+        setSyncError('');
         try {
           // Always sync ALL historical sales regardless of the display filter.
           // The display date filter is applied when loading from Supabase below.
           const result = await analyticsApi.syncPlatformSales(undefined, forceSync);
           if (!cancelledRef.current) {
             setLastSyncedAt(new Date().toISOString());
-          }
-          if (result.errors.length > 0) {
-            console.warn('Sync issues:', result.errors);
+            if (result.errors.length > 0) {
+              setSyncError(result.errors.join('; '));
+            }
           }
         } catch (err) {
-          console.error('Sync error:', err);
+          if (!cancelledRef.current) {
+            setSyncError(err instanceof Error ? err.message : 'Sync failed');
+          }
         } finally {
           setSyncing(false);
         }
@@ -147,6 +154,27 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {syncError && (
+        <div style={{
+          marginBottom: 16,
+          padding: '8px 12px',
+          borderRadius: 8,
+          background: 'rgba(255,59,48,0.08)',
+          border: '1px solid var(--neon-red)',
+          color: 'var(--neon-red)',
+          fontSize: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Sync error: {syncError}
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/settings')} style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--neon-cyan)' }}>
+            Reconnect in Settings
+          </button>
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="stat-card">

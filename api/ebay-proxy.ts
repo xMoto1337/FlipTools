@@ -17,7 +17,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Use POST to proxy requests' });
   }
 
-  const { endpoint, token, method, payload, tradingApiCall } = req.body;
+  const { endpoint, token, method, payload, tradingApiCall, ebayApiBase } = req.body;
+  // ebayApiBase: 'https://api.ebay.com' (prod) or 'https://api.sandbox.ebay.com' (sandbox)
+  const apiBase = (ebayApiBase as string) || 'https://api.ebay.com';
 
   if (!token) {
     return res.status(400).json({ error: 'Missing token' });
@@ -25,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // --- Trading API (XML-based legacy API) ---
   if (tradingApiCall) {
-    return handleTradingApi(req, res, tradingApiCall, token, payload);
+    return handleTradingApi(req, res, tradingApiCall, token, payload, apiBase);
   }
 
   // --- REST API ---
@@ -33,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing endpoint' });
   }
 
-  const ebayUrl = `https://api.ebay.com${endpoint}`;
+  const ebayUrl = `${apiBase}${endpoint}`;
   const ebayMethod = method || 'GET';
 
   try {
@@ -74,10 +76,11 @@ async function handleTradingApi(
   res: VercelResponse,
   callName: string,
   token: string,
-  xmlBody: string
+  xmlBody: string,
+  apiBase = 'https://api.ebay.com'
 ) {
   try {
-    const response = await fetch('https://api.ebay.com/ws/api.dll', {
+    const response = await fetch(`${apiBase}/ws/api.dll`, {
       method: 'POST',
       headers: {
         'X-EBAY-API-COMPATIBILITY-LEVEL': '1271',

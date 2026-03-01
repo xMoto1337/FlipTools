@@ -87,6 +87,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [depopConnecting, setDepopConnecting] = useState(false);
   const [depopError, setDepopError] = useState('');
+  const [magicLinkUrl, setMagicLinkUrl] = useState('');
   const setConnection = usePlatformStore((s) => s.setConnection);
 
   if (!isAuthenticated) {
@@ -143,12 +144,17 @@ export default function SettingsPage() {
       const unlisten = await listen<string>('depop-token', (event) => {
         unlisten();
         setDepopConnecting(false);
+        const token = event.payload;
+        // DEPOP_WEB:{slug} → extract slug as the display username
+        const username = token.startsWith('DEPOP_WEB:')
+          ? token.slice('DEPOP_WEB:'.length)
+          : 'Depop Account';
         setConnection('depop', {
           platform: 'depop',
-          accessToken: event.payload,
+          accessToken: token,
           refreshToken: '',
           tokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          platformUsername: 'Depop Account',
+          platformUsername: username,
           connectedAt: new Date().toISOString(),
         });
       });
@@ -158,6 +164,36 @@ export default function SettingsPage() {
       setDepopConnecting(false);
       setDepopError(`Failed to open login window: ${err}`);
       console.error('Depop connect error:', err);
+    }
+  };
+
+  // Manual fallback: runs a storage scan inside the already-authenticated WebView.
+  const handleScanDepop = async () => {
+    setDepopError('');
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('scan_depop_auth');
+    } catch (err) {
+      setDepopError(`Scan failed: ${err}`);
+    }
+  };
+
+  // Navigates the open Depop WebView to the magic-link URL the user pasted.
+  // After navigation, auto-scans for the logged-in user once the page has loaded.
+  const handleMagicLink = async () => {
+    if (!magicLinkUrl.trim()) return;
+    setDepopError('');
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('navigate_depop_window', { url: magicLinkUrl.trim() });
+      setMagicLinkUrl('');
+      // Auto-scan after the magic-link page has had time to load and authenticate.
+      // The init_script's window.load handler may already capture it; this is a fallback.
+      setTimeout(async () => {
+        try { await invoke('scan_depop_auth'); } catch {}
+      }, 3000);
+    } catch (err) {
+      setDepopError(`Could not navigate to link: ${err}`);
     }
   };
 
@@ -259,6 +295,50 @@ export default function SettingsPage() {
             connecting={depopConnecting}
             connectError={depopError}
           />
+          {depopConnecting && isTauri() && (
+            <div style={{
+              marginTop: 12,
+              padding: '12px 14px',
+              background: 'rgba(0,212,255,0.05)',
+              border: '1px solid rgba(0,212,255,0.2)',
+              borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                Waiting for sign-in…
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+                Depop sent a magic link to your email. In your email client, <strong>right-click
+                the sign-in button / link → "Copy Link Address"</strong>, then paste it below.
+                The login window will authenticate automatically.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <input
+                  className="form-input"
+                  style={{ flex: 1, fontSize: 12, height: 32 }}
+                  placeholder="Paste magic link URL here…"
+                  value={magicLinkUrl}
+                  onChange={(e) => setMagicLinkUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleMagicLink()}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleMagicLink}
+                  disabled={!magicLinkUrl.trim()}
+                >
+                  Open
+                </button>
+              </div>
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                Already signed in via the popup?{' '}
+                <button
+                  style={{ background: 'none', border: 'none', color: 'var(--neon-cyan, #00d4ff)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}
+                  onClick={handleScanDepop}
+                >
+                  Click here to save your connection
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

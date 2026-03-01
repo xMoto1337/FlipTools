@@ -10,6 +10,7 @@ interface AnalyticsState {
   platformFilter: string;
   isLoading: boolean;
   isSyncing: boolean;
+  syncError: string;
   lastSyncedAt: string | null;
   _syncPromise: Promise<unknown> | null;
 
@@ -19,6 +20,7 @@ interface AnalyticsState {
   setPlatformFilter: (platform: string) => void;
   setLoading: (loading: boolean) => void;
   setSyncing: (syncing: boolean) => void;
+  setSyncError: (error: string) => void;
   setLastSyncedAt: (date: string) => void;
 
   getDateRangeStart: () => string | undefined;
@@ -31,6 +33,7 @@ export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
   platformFilter: '',
   isLoading: false,
   isSyncing: false,
+  syncError: '',
   lastSyncedAt: null,
   _syncPromise: null,
 
@@ -40,6 +43,7 @@ export const useAnalyticsStore = create<AnalyticsState>()((set, get) => ({
   setPlatformFilter: (platformFilter) => set({ platformFilter }),
   setLoading: (isLoading) => set({ isLoading }),
   setSyncing: (isSyncing) => set({ isSyncing }),
+  setSyncError: (syncError) => set({ syncError }),
   setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt }),
 
   getDateRangeStart: () => {

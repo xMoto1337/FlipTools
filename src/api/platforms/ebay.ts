@@ -12,10 +12,15 @@ import type {
 
 // Use sandbox URLs for development, switch to production for release
 // Detect sandbox from config flag OR from client ID containing "SBX"
+// (matches server-side detection in api/ebay-auth.ts)
 const IS_SANDBOX = config.ebay.sandbox || config.ebay.clientId.includes('SBX');
 const EBAY_AUTH_URL = IS_SANDBOX
   ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
   : 'https://auth.ebay.com/oauth2/authorize';
+// API base passed to the proxy so it uses the correct environment's endpoints
+const EBAY_API_BASE = IS_SANDBOX
+  ? 'https://api.sandbox.ebay.com'
+  : 'https://api.ebay.com';
 
 // Map eBay's PrimaryCategory name to our internal category keys
 function normalizeEbayCategory(ebayCategory: string): string {
@@ -50,7 +55,8 @@ const CONDITION_MAP: Record<string, string> = {
   'for parts': 'FOR_PARTS_OR_NOT_WORKING',
 };
 
-// All eBay API calls must go through our proxy to avoid CORS issues
+// All eBay API calls must go through our proxy to avoid CORS issues.
+// ebayApiBase is forwarded so the proxy targets the right environment (sandbox vs prod).
 async function ebayGet(endpoint: string, token: string): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000); // 30-second timeout
@@ -58,7 +64,7 @@ async function ebayGet(endpoint: string, token: string): Promise<Response> {
     return await fetch('/api/ebay-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, token, method: 'GET' }),
+      body: JSON.stringify({ endpoint, token, method: 'GET', ebayApiBase: EBAY_API_BASE }),
       signal: controller.signal,
     });
   } catch (err) {
@@ -75,7 +81,7 @@ async function ebayPost(endpoint: string, token: string, payload: unknown): Prom
   const resp = await fetch('/api/ebay-proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ endpoint, token, method: 'POST', payload }),
+    body: JSON.stringify({ endpoint, token, method: 'POST', payload, ebayApiBase: EBAY_API_BASE }),
   });
   return resp;
 }
@@ -219,6 +225,7 @@ export const ebayAdapter: PlatformAdapter = {
         tradingApiCall: 'ReviseItem',
         token,
         payload: xmlBody,
+        ebayApiBase: EBAY_API_BASE,
       }),
     });
 
@@ -277,6 +284,7 @@ export const ebayAdapter: PlatformAdapter = {
           tradingApiCall: 'GetMyeBaySelling',
           token,
           payload: xmlBody,
+          ebayApiBase: EBAY_API_BASE,
         }),
       });
 

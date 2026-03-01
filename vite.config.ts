@@ -31,6 +31,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 1422,
       strictPort: false,
+      proxy: {
+        // Forward /api/* to the live Vercel deployment so the desktop dev app
+        // can reach serverless functions without running `vercel dev` separately.
+        '/api': {
+          target: 'https://fliptools.net',
+          changeOrigin: true,
+          secure: true,
+        },
+      },
       watch: {
         ignored: ['**/src-tauri/**'],
       },
